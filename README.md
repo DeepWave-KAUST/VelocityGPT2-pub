@@ -37,5 +37,5 @@ conda activate my_env
 configurations may be required for different combinations of workstation and GPU.
 
 ## Cite us 
-DWXXX - Harsuko et al. (2022) VelocityGPT: A sequential depth-wise velocity model generator in an autoregressive framework.
+DW0041 - Harsuko et al. (2022) VelocityGPT: A sequential depth-wise velocity model generator in an autoregressive framework.
 

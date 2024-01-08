@@ -1,23 +1,22 @@
-![LOGO](https://github.com/DeepWave-Kaust/Project-Template/blob/main/asset/logo.png)
+![LOGO](https://github.com/DeepWave-KAUST/VelocityGPT-dev/blob/main/asset/logo.png)
 
-Reproducible material for **XXX - Author M., Author M., Author C.**
+Reproducible material for **VelocityGPT: A sequential depth-wise velocity model generator in an autoregressive framework - Harsuko R., Cheng S., Alkhalifah T.**
 
 [Click here](https://kaust.sharepoint.com/:f:/r/sites/M365_Deepwave_Documents/Shared%20Documents/Restricted%20Area/DWxxxxxxxx) to access the Project Report. Authentication to the _Restricted Area_ filespace is required.
 
 # Project structure
 This repository is organized as follows:
 
-* :open_file_folder: **package**: python library containing routines for ....;
+* :open_file_folder: **velocitygpt**: python library containing routines for VelocityGPT;
 * :open_file_folder: **asset**: folder containing logo;
 * :open_file_folder: **data**: folder containing data (or instructions on how to retrieve the data
 * :open_file_folder: **notebooks**: set of jupyter notebooks reproducing the experiments in the paper (see below for more details);
-* :open_file_folder: **scripts**: set of python scripts used to run multiple experiments ...
 
 ## Notebooks
 The following notebooks are provided:
 
-- :orange_book: ``X1.ipynb``: notebook performing ...;
-- :orange_book: ``X2.ipynb``: notebook performing ...
+- :orange_book: ``VQVAE_training.ipynb``: notebook performing training of the VQ-VAE;
+- :orange_book: ``VelocityGPT_training.ipynb``: notebook performing training of the GPT
 
 
 ## Getting started :space_invader: :robot:
@@ -38,5 +37,5 @@ conda activate my_env
 configurations may be required for different combinations of workstation and GPU.
 
 ## Cite us 
-DWXXX - Author1 et al. (2022) Report title.
+DWXXX - Harsuko et al. (2022) VelocityGPT: A sequential depth-wise velocity model generator in an autoregressive framework.
 

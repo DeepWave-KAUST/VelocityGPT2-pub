@@ -17,7 +17,8 @@ This repository is organized as follows:
 The following notebooks are provided:
 
 - :orange_book: ``VQVAE_training.ipynb``: notebook performing training of the VQ-VAE;
-- :orange_book: ``VelocityGPT_training.ipynb``: notebook performing training of the GPT
+- :orange_book: ``VelocityGPT_training.ipynb``: notebook performing training of the GPT;
+- :orange_book: ``Visualization.ipynb``: notebook to visualize the results
 
 
 ## Getting started :space_invader: :robot:

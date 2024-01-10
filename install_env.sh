@@ -11,8 +11,10 @@ echo 'Creating Package environment'
 conda env create -f environment.yml
 source ~/anaconda3/etc/profile.d/conda.sh 2>/dev/null || source ~/miniconda3/etc/profile.d/conda.sh
 
-conda activate my_env
+conda activate velocitygpt
 echo 'Created and activated environment:' $(which python)
+pip install git+https://github.com/LiyuanLucasLiu/RAdam
+python -m ipykernel install --user --name VelocityGPT
 
 # Check torch OR tensorflow works as expected
 echo 'Checking torch version and running a command...'

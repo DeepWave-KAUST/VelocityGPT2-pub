@@ -2,7 +2,7 @@
 
 Reproducible material for **VelocityGPT: A sequential depth-wise velocity model generator in an autoregressive framework - Harsuko R., Cheng S., Alkhalifah T.**
 
-[Click here](https://kaust.sharepoint.com/:f:/r/sites/M365_Deepwave_Documents/Shared%20Documents/Restricted%20Area/DWxxxxxxxx) to access the Project Report. Authentication to the _Restricted Area_ filespace is required.
+[Click here](https://kaust.sharepoint.com/:f:/r/sites/M365_Deepwave_Documents/Shared%20Documents/Restricted%20Area/DW0041?csf=1&web=1&e=Y8Wz1I) to access the Project Report. Authentication to the _Restricted Area_ filespace is required.
 
 # Project structure
 This repository is organized as follows:

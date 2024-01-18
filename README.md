@@ -13,6 +13,9 @@ This repository is organized as follows:
 * :open_file_folder: **results**: folder reserved for storing results;
 * :open_file_folder: **notebooks**: set of jupyter notebooks reproducing the experiments in the paper (see below for more details);
 
+## Supplementary files
+We shared the data (velocity models) used in our experiments. Before running the notebooks below, please download the data from [here](https://kaust.sharepoint.com/:f:/r/sites/M365_Deepwave_Documents/Shared%20Documents/Restricted%20Area/DW0041/data?csf=1&web=1&e=4fcQjq). Then, put all the contents into the ``/data`` folder.
+
 ## Notebooks
 The following notebooks are provided:
 

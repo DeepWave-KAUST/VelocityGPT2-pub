@@ -108,7 +108,11 @@ def parse_args():
 
     # Misc parameters
     parser.add_argument('--device', type=str, default='cuda')
-    parser.add_argument('--cuda_idx', type=str, default='0')
+    if "CUDA_VISIBLE_DEVICES" in os.environ.keys():
+        cuda_idx = os.environ["CUDA_VISIBLE_DEVICES"]
+    else:
+        cuda_idx = 0
+    parser.add_argument('--cuda_idx', default=cuda_idx)
     parser.add_argument('--seed', type=int, default=123)
     parser.add_argument('--shuffle', action='store_true')
     parser.add_argument('--aug_flip', action='store_true')
@@ -136,7 +140,6 @@ def parse_args():
     return parser.parse_args()
 
 def main(args):
-    os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda_idx
     set_mpl_params()
     setup(args)
     train_data, test_data, scaler1, pad = load_and_prep(args)

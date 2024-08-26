@@ -15,6 +15,23 @@ def parse_list_of_lists(arg_value):
     # Assume the input is given in a specific format, like "1,2,3;4,5,6;7,8"
     return [list(map(int, group.split(','))) for group in arg_value.split(';')]
 
+
+def parse_range(value):
+    range_list = []
+    for part in value.split(','):
+        if '-' in part:
+            start_end = part.split('-')
+            start = int(start_end[0])
+            if ':' in start_end[1]:
+                end, step = map(int, start_end[1].split(':'))
+            else:
+                end = int(start_end[1])
+                step = 1
+            range_list.extend(range(start, end + 1, step))
+        else:
+            range_list.append(int(part))
+    return range_list
+
 def parse_args():
     parser = argparse.ArgumentParser(description="StorSeismic Fine-tune Denoising")
     # Data parameters
@@ -103,7 +120,7 @@ def parse_args():
     parser.add_argument('--compress_ratio', nargs='+', type=int, default=[])
     parser.add_argument('--smooth_class', type=parse_list_of_lists, default=[])
     parser.add_argument('--smooth', nargs='+', type=float, default=[])
-    parser.add_argument('--dip_bins', nargs='+', type=int, default=[])
+    parser.add_argument('--dip_bins', type=parse_range, default=[])
     parser.add_argument('--scaler2', type=int, default=2)
     parser.add_argument('--scaler3', type=float, default=0.5)
     parser.add_argument('--vqvae_dir', type=str, required=True)

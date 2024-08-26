@@ -23,3 +23,9 @@ package/version.py
 # Development #
 .ipynb_checkpoints/
 
+# Test & experiments scripts #
+test*.sh
+experiment*.sh
+
+# WandB files #
+wandb/

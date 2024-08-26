@@ -1,11 +1,19 @@
 import torch
+from torch import nn
 import matplotlib
 import numpy as np
 import random
-import torch.nn.functional as F
-from scipy import signal
-from scipy.ndimage import gaussian_filter
 import pandas as pd
+from skimage.transform import resize
+import gc
+import subprocess
+import os
+
+def setup(config):
+    set_seed(config.seed)
+    torch.backends.cudnn.benchmark = False
+    gc.collect()
+    torch.cuda.empty_cache()
 
 def set_mpl_params():
     """Set matplotlib parameters for plotting."""
@@ -44,6 +52,16 @@ def set_seed(seed):
     np.random.seed(seed)
     random.seed(seed)
 
+def get_git_info():
+    try:
+        commit = subprocess.check_output(["git", "rev-parse", "HEAD"]).strip().decode('utf-8')
+        branch = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"]).strip().decode('utf-8')
+    except Exception as e:
+        print(f"Error retrieving Git information: {e}")
+        commit = "unknown"
+        branch = "unknown"
+    return commit, branch
+
 def count_parameters(model):
     """Count the number of trainable parameters of a model.
 
@@ -63,6 +81,74 @@ def count_parameters(model):
         total_params+=param
         table.loc[i] = [name] + [param]
         i += 1
-    display(table)
+    print(table)
     print(f"Total Trainable Params: {total_params}")
     return total_params
+
+def save_all(model, avg_train_loss, avg_valid_loss, time_per_epoch, config):
+    # Save everything
+    print("Saving to", config.parent_dir)
+    if os.path.exists(os.path.join(config.parent_dir, 'model.pt')):
+        if input("Path exists. Overwrite? (y/n)") == 'y':
+            torch.save(model, os.path.join(config.parent_dir, 'model.pt'))
+            avg_train_loss_arr = np.array(avg_train_loss)
+            avg_valid_loss_arr = np.array(avg_valid_loss)
+            time_arr = np.array(time_per_epoch)
+            np.save(os.path.join(config.parent_dir, 'train_loss.npy'), avg_train_loss_arr)
+            np.save(os.path.join(config.parent_dir, 'valid_loss.npy'), avg_valid_loss_arr)
+            np.save(os.path.join(config.parent_dir, 'time.npy'), time_arr)
+            torch.save(config, os.path.join(config.parent_dir, 'config.pt'))
+            print("Saved successfully to", config.parent_dir)
+        else:
+            print("Saving failed.")
+    else:
+        torch.save(model, os.path.join(config.parent_dir, 'model.pt'))
+        avg_train_loss_arr = np.array(avg_train_loss)
+        avg_valid_loss_arr = np.array(avg_valid_loss)
+        time_arr = np.array(time_per_epoch)
+        np.save(os.path.join(config.parent_dir, 'train_loss.npy'), avg_train_loss_arr)
+        np.save(os.path.join(config.parent_dir, 'valid_loss.npy'), avg_valid_loss_arr)
+        np.save(os.path.join(config.parent_dir, 'time.npy'), time_arr)
+        torch.save(config, os.path.join(config.parent_dir, 'config.pt'))
+        print("Saved successfully to", config.parent_dir)
+
+def _to_sequence(inp, inv=False, orig_shape=None):
+    if not inv:
+        nb, nx, nz = inp.shape
+        out = inp.transpose(-1, -2) # batch, z, x
+        out = out.reshape(-1, out.shape[-1]).unsqueeze(1)  # flatten images into sequences
+        
+        return out, (nb, nx, nz)
+    
+    elif inv and orig_shape is not None:
+        out = inp.squeeze(1).reshape(orig_shape[0], -1, orig_shape[1])
+        out = out.transpose(-1, -2) # batch, x, z
+
+        return out
+    
+def _to_sequence2(inp, inv=False, orig_shape=None):
+    if not inv:
+        nb, nx, nz = inp.shape
+        out = inp.transpose(-1, -2).reshape(nb, -1) # batch, L
+        out = out.transpose(0, 1)  # L, batch
+        
+        return out, (nb, nx, nz)
+    
+    elif inv and orig_shape is not None:
+        out = inp.transpose(0, 1) # batch, L
+        out = out.reshape(-1, orig_shape[2], orig_shape[1]).transpose(-1, -2)
+        
+        return out
+    
+def get_lr(optim):
+    for param_group in optim.param_groups:
+        return param_group['lr']
+    
+def PSNR(x, xinv):
+    return 10 * torch.log10(len(xinv) * torch.max(xinv) ** 2 / torch.linalg.norm(x - xinv) ** 2)
+
+def set_dropout_prob(model, p=0.1):
+    for idx, m in enumerate(model.named_modules()): 
+        component = m[1]
+        if isinstance(component, nn.Dropout):
+            component.p = p

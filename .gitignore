@@ -15,7 +15,7 @@ db.sqlite3
 # Build #
 build
 dist
-package.egg-info/
+velocitygpt.egg-info/
 
 # setuptools_scm generated  #
 package/version.py 

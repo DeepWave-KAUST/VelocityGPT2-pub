@@ -144,7 +144,6 @@ def main(args):
     setup(args)
     train_data, test_data, scaler1, pad = load_and_prep(args)
     train_dataloader, test_dataloader = build_dataloader(args, train_data, test_data)
-    train_dataloader, test_dataloader = build_dataloader(args, train_data, test_data)
     vqvae_model = load_model(args)
     if args.vqvae_refl_dir is not None:
         vqvae_refl_model = load_model(args, model_type="refl")

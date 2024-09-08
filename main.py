@@ -7,8 +7,8 @@ from velocitygpt.pipeline import *
 from velocitygpt.datasets import *
 from velocitygpt.modules import *
 from velocitygpt.quantizer import *
-from velocitygpt.train import run_velgen
-from velocitygpt.vis import plot_example
+from velocitygpt.train import run_velenc, run_velgen
+from velocitygpt.vis import plot_example, plot_example2
 from pathlib import Path
 
 def parse_list_of_lists(arg_value):
@@ -52,7 +52,18 @@ def parse_args():
     parser.add_argument('--nt0', type=float, default=64)
     parser.add_argument('--ntwav', type=float, default=63)
 
-    # Model parameters
+    # VQVAE Model parameters
+    parser.add_argument('--vq_type', type=str, default='vqvae')
+    parser.add_argument('--n_layer', type=int, default=2)
+    parser.add_argument('--dim', type=int, default=128)
+    parser.add_argument('--input_dim', type=int, default=1)
+    parser.add_argument('--intermediate_dim', type=int, default=64)
+    parser.add_argument('--K', type=int, default=128)
+    parser.add_argument('--add_input_latent_noise', action='store_true')
+    parser.add_argument('--input_noise_factor', type=float, default=0.1)
+    parser.add_argument('--latent_noise_factor', type=float, default=0.1)
+
+    # GPT Model parameters
     parser.add_argument('--latent_dim', type=int, default=16)
     parser.add_argument('--vocab_size', type=int, default=128)
     parser.add_argument('--refl_vocab_size', type=int, default=128)
@@ -85,6 +96,7 @@ def parse_args():
     parser.add_argument('--add_dip_to_well', action='store_true')
 
     # Training parameters
+    parser.add_argument('--training_stage', type=str, required=True)
     parser.add_argument('--parent_dir', type=str, default='.', help="Saving directory")
     parser.add_argument('--lr', type=float, default=0.0025)
     parser.add_argument('--lr_min', type=float, default=0.000001)
@@ -105,6 +117,9 @@ def parse_args():
     parser.add_argument('--sampling_type', type=str, default='teacher_forcing')
     parser.add_argument('--classify', action='store_true')
     parser.add_argument('--loss', type=str, default='crossentropy')
+    parser.add_argument('--beta', type=float, default=0.1)
+    parser.add_argument('--recon_loss_fn', type=str, default='l2')
+    parser.add_argument('--use_focal_loss', action='store_true')
 
     # Misc parameters
     parser.add_argument('--device', type=str, default='cuda')
@@ -127,7 +142,7 @@ def parse_args():
     parser.add_argument('--dip_bins', type=parse_range, default=[])
     parser.add_argument('--scaler2', type=int, default=2)
     parser.add_argument('--scaler3', type=float, default=0.5)
-    parser.add_argument('--vqvae_dir', type=str, required=True)
+    parser.add_argument('--vqvae_dir', type=str, default=None)
     parser.add_argument('--vqvae_refl_dir', type=None, default=None)
 
     # WandB parameters
@@ -144,11 +159,12 @@ def main(args):
     setup(args)
     train_data, test_data, scaler1, pad = load_and_prep(args)
     train_dataloader, test_dataloader = build_dataloader(args, train_data, test_data)
-    vqvae_model = load_model(args)
-    if args.vqvae_refl_dir is not None:
-        vqvae_refl_model = load_model(args, model_type="refl")
-    else:
-        vqvae_refl_model = None
+    if "vqvae" not in args.training_stage:
+        vqvae_model = load_model(args)
+        if args.vqvae_refl_dir is not None:
+            vqvae_refl_model = load_model(args, model_type="refl")
+        else:
+            vqvae_refl_model = None
     model = build_model(args)
     if args.wandb_log:
         wandb.watch(model, log_freq=1)
@@ -158,14 +174,21 @@ def main(args):
     warmup, scheduler = build_warmup_and_scheduler(args, optim)
     loss_fn = build_loss_fn(args)
 
-    model, avg_train_loss, avg_valid_loss, time_per_epoch = \
-        run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, loss_fn, train_dataloader, 
-                   test_dataloader, scaler1, args, verbose=False)
+    if "vqvae" in args.training_stage:
+        model, avg_train_loss, avg_valid_loss, time_per_epoch = \
+            run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_dataloader, scaler1,
+                    args, verbose=False)
+        plot_example2(model, train_data, scaler1[0], pad, args, [0], log=args.wandb_log, prefix=1)
+        plot_example2(model, test_data, scaler1[1], pad, args, [0], log=args.wandb_log, prefix=2)
+    else:
+        model, avg_train_loss, avg_valid_loss, time_per_epoch = \
+            run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, loss_fn, train_dataloader, 
+                    test_dataloader, scaler1, args, verbose=False)
     
-    plot_example(vqvae_model, vqvae_refl_model, model, train_data, scaler1[0], pad, args, [0], 
-                     idx_gen=[35], log=args.wandb_log, prefix=1)
-    plot_example(vqvae_model, vqvae_refl_model, model, test_data, scaler1[1], pad, args, [0], 
-                    idx_gen=[35], log=args.wandb_log, prefix=2)
+        plot_example(vqvae_model, vqvae_refl_model, model, train_data, scaler1[0], pad, args, [0], 
+                        idx_gen=[35], log=args.wandb_log, prefix=1)
+        plot_example(vqvae_model, vqvae_refl_model, model, test_data, scaler1[1], pad, args, [0], 
+                        idx_gen=[35], log=args.wandb_log, prefix=2)
                         
     if args.wandb_log:
         wandb.log({"total_params" : total_params})

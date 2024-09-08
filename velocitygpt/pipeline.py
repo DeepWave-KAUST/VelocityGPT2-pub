@@ -33,7 +33,7 @@ from .datasets import *
 from .datasets import _get_dip
 from .losses import *
 from .models import *
-from .quantizer import FSQ
+from .quantizer import *
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -145,8 +145,8 @@ def load_and_prep(config):
                     if key in ['input', 'label']:
                         resized_images = []
                         for j in range(len(data.data[key])):
-                            resized_images.append(torch.tensor(resize_image(data.data[key][j].numpy(), 
-                                                                            config.image_size)))
+                            resized_images.append(torch.tensor(resize_image2(data.data[key][j].numpy(), 
+                                                                             config.image_size)))
                         data.data[key] = torch.stack(resized_images)
         # Compress
         if config.compress_class and config.compress_ratio:
@@ -178,7 +178,7 @@ def load_and_prep(config):
                         data.data[key] = torch.cat((data.data[key], compressed), dim=0)
                         
         # Reflectivity / Image
-        if config.vqvae_refl_dir is not None:
+        if config.vqvae_refl_dir is not None or config.training_stage == "vqvae-training-refl":
             AI = make_AI(data.data['input'])
             if config.input_type == "refl":
                 inp = make_refl(AI)
@@ -187,6 +187,9 @@ def load_and_prep(config):
                 wav, twav, wavc = ricker(t0[: config.ntwav // 2 + 1], config.freq)
                 inp = make_post(AI.numpy(), wav)
             data.data['refl'] = inp.clone()
+            if config.training_stage == "vqvae-training-refl":
+                data.data['input'] = inp.clone()
+                data.data['label'] = inp.clone()
                         
         # Flip
         if config.aug_flip:
@@ -258,30 +261,41 @@ def load_model(config, model_type="vel"):
 def build_model(config):
     device = config.device
     set_seed(config.seed)
-    model = GPT2(config)
-    print(model)
-    latents = torch.randint(high=config.vocab_size, size=(config.max_length, config.batch_size))
-    cls = torch.randint(high=config.num_classes, size=(config.batch_size,))
-    if config.well_cond_prob > 0:
-        well_pos = torch.randint(high=config.image_size[0], size=(config.batch_size,))
-        latents_well = torch.randint(high=config.vocab_size, size=(config.latent_dim, config.batch_size))
-        input_data = [latents, cls, well_pos, latents_well]
+    if "vqvae" in config.training_stage:
+        if config.vq_type == "vqvae":
+            model = VectorQuantizedVAE(config)
+        elif config.vq_type == "vqvae2":
+            model = VQVAE(config)
+            
+        print(summary(model.to('cuda:0'), 
+                    input_size=(config.batch_size, 1, config.image_size[0], config.image_size[1]), 
+                    device=config.device))
+        
     else:
-        well_pos = None
-        latents_well = None
-        input_data = [latents, cls]
-    if config.use_dip:
-        dip = torch.randint(high=len(config.dip_bins), size=(config.batch_size, config.max_length))
-        input_data.append(dip)
-    if config.vqvae_refl_dir is not None:
-        refl = torch.randint(high=config.refl_vocab_size, size=(config.max_length, config.batch_size))
-        input_data.append(refl)
-    if config.add_dip_to_well:
-        dip_well = torch.randint(high=len(config.dip_bins), size=(config.latent_dim, config.batch_size))
-        input_data.append(dip_well)
-    print(summary(model.to(config.device), 
-                  input_data=input_data, 
-                  device=config.device))
+        model = GPT2(config)
+        print(model)
+        latents = torch.randint(high=config.vocab_size, size=(config.max_length, config.batch_size))
+        cls = torch.randint(high=config.num_classes, size=(config.batch_size,))
+        if config.well_cond_prob > 0:
+            well_pos = torch.randint(high=config.image_size[0], size=(config.batch_size,))
+            latents_well = torch.randint(high=config.vocab_size, size=(config.latent_dim, config.batch_size))
+            input_data = [latents, cls, well_pos, latents_well]
+        else:
+            well_pos = None
+            latents_well = None
+            input_data = [latents, cls]
+        if config.use_dip:
+            dip = torch.randint(high=len(config.dip_bins), size=(config.batch_size, config.max_length))
+            input_data.append(dip)
+        if config.vqvae_refl_dir is not None:
+            refl = torch.randint(high=config.refl_vocab_size, size=(config.max_length, config.batch_size))
+            input_data.append(refl)
+        if config.add_dip_to_well:
+            dip_well = torch.randint(high=len(config.dip_bins), size=(config.latent_dim, config.batch_size))
+            input_data.append(dip_well)
+        print(summary(model.to(config.device), 
+                    input_data=input_data, 
+                    device=config.device))
     
     return model.to(config.device)
 

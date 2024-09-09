@@ -49,8 +49,8 @@ def parse_args():
     parser.add_argument('--norm_const', type=float, default=4500)
     parser.add_argument('--dt0', type=float, default=0.016)
     parser.add_argument('--freq', type=float, default=20)
-    parser.add_argument('--nt0', type=float, default=64)
-    parser.add_argument('--ntwav', type=float, default=63)
+    parser.add_argument('--nt0', type=int, default=64)
+    parser.add_argument('--ntwav', type=int, default=63)
 
     # VQVAE Model parameters
     parser.add_argument('--vq_type', type=str, default='vqvae')

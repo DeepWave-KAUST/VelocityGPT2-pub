@@ -283,16 +283,22 @@ def build_model(config):
         else:
             well_pos = None
             latents_well = None
-            input_data = [latents, cls]
+            input_data = [latents, cls, well_pos, latents_well]
         if config.use_dip:
             dip = torch.randint(high=len(config.dip_bins), size=(config.batch_size, config.max_length))
             input_data.append(dip)
+        else:
+            input_data.append(None)
         if config.vqvae_refl_dir is not None:
             refl = torch.randint(high=config.refl_vocab_size, size=(config.max_length, config.batch_size))
             input_data.append(refl)
+        else:
+            input_data.append(None)
         if config.add_dip_to_well:
-            dip_well = torch.randint(high=len(config.dip_bins), size=(config.latent_dim, config.batch_size))
+            dip_well = torch.randint(high=len(config.dip_bins), size=(config.batch_size, config.latent_dim))
             input_data.append(dip_well)
+        else:
+            input_data.append(None)
         print(summary(model.to(config.device), 
                     input_data=input_data, 
                     device=config.device))

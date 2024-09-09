@@ -102,7 +102,7 @@ class GPT2(nn.Module):
             use_refl_embed[refl[0, :] == self.refl_vocab_size] = 0
             use_refl_embed = self.use_refl_embeddings(use_refl_embed).unsqueeze(0)
             refl_embed = self.refl_embeddings(refl)
-            h[1:] += refl_embed[1:]
+            h[1+self.use_dip:] += refl_embed[1:]
             h = torch.cat([use_refl_embed, h], axis=0)
         
         if self.well_cond_prob > 0 and well_pos is not None and well_token is not None:

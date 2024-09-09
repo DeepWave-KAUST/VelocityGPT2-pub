@@ -197,6 +197,10 @@ def main(args):
 
 if __name__ == "__main__":
     args = parse_args()
+    args.max_position_embeddings = args.max_length + \
+                                (args.latent_dim + 1) * math.ceil(args.well_cond_prob) + \
+                                args.use_dip + \
+                                int(0 if args.vqvae_refl_dir is None else 1)
     if args.wandb_log:
         wandb.login()
         wandb.init(config=args, project='ElasticGPT', 

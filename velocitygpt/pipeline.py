@@ -179,17 +179,21 @@ def load_and_prep(config):
                         
         # Reflectivity / Image
         if config.vqvae_refl_dir is not None or config.training_stage == "vqvae-training-refl":
-            AI = make_AI(data.data['input'])
-            if config.input_type == "refl":
-                inp = make_refl(AI)
-            elif config.input_type == "img":
-                t0 = np.arange(config.nt0) * config.dt0
-                wav, twav, wavc = ricker(t0[: config.ntwav // 2 + 1], config.freq)
-                inp = make_post(AI.numpy(), wav)
-            data.data['refl'] = inp.clone()
-            if config.training_stage == "vqvae-training-refl":
-                data.data['input'] = inp.clone()
-                data.data['label'] = inp.clone()
+            if 'refl' not in data.data.keys():
+                AI = make_AI(data.data['input'])
+                if config.input_type == "refl":
+                    inp = make_refl(AI)
+                elif config.input_type == "img":
+                    t0 = np.arange(config.nt0) * config.dt0
+                    wav, twav, wavc = ricker(t0[: config.ntwav // 2 + 1], config.freq)
+                    inp = make_post(AI.numpy(), wav)
+                data.data['refl'] = inp.clone()
+                if config.training_stage == "vqvae-training-refl":
+                    data.data['input'] = inp.clone()
+                    data.data['label'] = inp.clone()
+            elif 'refl' in data.data.keys() and config.training_stage == "vqvae-training-refl":
+                data.data['input'] = data.data['refl'].clone()
+                data.data['label'] = data.data['refl'].clone()
                         
         # Flip
         if config.aug_flip:

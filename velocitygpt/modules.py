@@ -298,3 +298,26 @@ class Block(nn.Module):
         m = self.mlp(self.ln_2(x))
         x = x + m
         return x
+    
+class WDSRBlock(nn.Module):
+    def __init__(
+        self, n_feats, kernel_size, wn, act=nn.ReLU(True), res_scale=1):
+        super(WDSRBlock, self).__init__()
+        self.res_scale = res_scale
+        body = []
+        expand = 6
+        linear = 0.8
+        body.append(
+            wn(nn.Conv2d(n_feats, n_feats*expand, 1, padding=1//2)))
+        body.append(act)
+        body.append(
+            wn(nn.Conv2d(n_feats*expand, int(n_feats*linear), 1, padding=1//2)))
+        body.append(
+            wn(nn.Conv2d(int(n_feats*linear), n_feats, kernel_size, padding=kernel_size//2)))
+
+        self.body = nn.Sequential(*body)
+
+    def forward(self, x):
+        res = self.body(x) * self.res_scale
+        res += x
+        return res

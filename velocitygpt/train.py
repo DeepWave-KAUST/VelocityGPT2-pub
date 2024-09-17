@@ -595,3 +595,178 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
         model.load_state_dict(torch.load(checkpoint))
 
     return model, avg_train_loss, avg_valid_loss, time_per_epoch
+
+def run_velup(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_dataloader, scaler1, config, 
+               plot=False, f=None, ax=None, verbose=True):
+    epochs = config.epoch
+    device = config.device
+    total_time = time.time()
+    avg_train_loss = []
+    avg_valid_loss = []
+    avg_train_psnr = []
+    avg_valid_psnr = []
+    avg_train_ssim = []
+    avg_valid_ssim = []
+    time_per_epoch = []
+    lr_epoch = []
+    if config.patience is not None:
+        checkpoint = os.path.join(config.parent_dir, str(os.getpid())+"checkpoint.pt")
+        early_stopping = EarlyStopping(patience=config.patience, verbose=False, path=checkpoint)
+    
+    loop_epoch = tqdm(range(epochs))
+    for epoch in loop_epoch:
+        epoch_time = time.time()
+        lr_epoch.append(get_lr(optim))
+        model.train()
+        # setup loop with TQDM and dataloader
+        if verbose:
+            loop_train = tqdm(train_dataloader, leave=True, position=0)
+        else:
+            loop_train = train_dataloader
+        losses_train = 0
+        psnr_train = 0
+        ssim_train = 0
+        for i, batch in enumerate(loop_train):
+            # initialize calculated gradients (from prev step)
+            optim.zero_grad()
+
+            # pull all tensor batches required for training
+            inputs = batch['input'].to(config.device)
+            labels = batch['label'].to(config.device)
+
+            # process
+            x_tilde = model(inputs.unsqueeze(1))
+            loss = loss_fn(x_tilde, labels.unsqueeze(1))
+
+            loss.backward()
+
+            # update parameters
+            optim.step()
+            
+            # warmup and scheduler
+            if warmup is not None:
+                if i < len(train_dataloader)-1:
+                    with warmup.dampening():
+                        pass
+            
+            # calculate metrics
+            losses_train += loss.item()
+            with torch.no_grad():
+#                 outputs = _to_sequence(x_tilde, config, inv=True)
+                outputs = x_tilde.squeeze(1)
+                selected_outputs = (outputs.unsqueeze(1) / config.scaler2) + config.scaler3
+                selected_labels = (labels.unsqueeze(1) / config.scaler2) + config.scaler3
+                idx_start = i*config.batch_size
+                idx_end = (i+1)*config.batch_size
+                psnr_train += PSNR((selected_outputs * scaler1[0][idx_start:idx_end][:, None, None, None]).ravel(),
+                                   (selected_labels * scaler1[0][idx_start:idx_end][:, None, None, None]).ravel())
+                ssim_train += ssim((selected_outputs * scaler1[0][idx_start:idx_end][:, None, None, None]) + 1, 
+                                   (selected_labels * scaler1[0][idx_start:idx_end][:, None, None, None]) + 1, 
+                                   data_range=2, size_average=True)
+            if verbose:
+                loop_train.set_description(f'Epoch {epoch}')
+                loop_train.set_postfix(loss=loss.item())
+            
+            if i == 0:
+                nvsmi = nvidia_smi.getInstance()
+                gpu_memory_used = nvsmi.DeviceQuery('memory.used')['gpu'][0]['fb_memory_usage']['used']
+                
+        if scheduler is not None:
+            if warmup is not None:
+                with warmup.dampening():
+                    scheduler.step()
+            else:
+                scheduler.step() 
+                        
+        model.eval()
+        if verbose:
+            loop_valid = tqdm(test_dataloader, leave=True, position=0)
+        else:
+            loop_valid = test_dataloader
+        losses_valid = 0
+        psnr_valid = 0
+        ssim_valid = 0
+        with torch.no_grad():
+            for i, batch in enumerate(loop_valid):
+                # pull all tensor batches required for training
+                inputs = batch['input'].to(config.device)
+                labels = batch['label'].to(config.device)
+
+                # process
+                x_tilde = model(inputs.unsqueeze(1))
+                loss = loss_fn(x_tilde, labels.unsqueeze(1))
+                
+                # calculate metrics
+                losses_valid += loss.item()
+#                 outputs = _to_sequence(x_tilde, config, inv=True)
+                outputs = x_tilde.squeeze(1)
+                selected_outputs = (outputs.unsqueeze(1) / config.scaler2) + config.scaler3
+                selected_labels = (labels.unsqueeze(1) / config.scaler2) + config.scaler3
+                idx_start = i*config.batch_size
+                idx_end = (i+1)*config.batch_size
+                psnr_valid += PSNR((selected_outputs * scaler1[1][idx_start:idx_end][:, None, None, None]).ravel(),
+                                   (selected_labels * scaler1[1][idx_start:idx_end][:, None, None, None]).ravel())
+                ssim_valid += ssim((selected_outputs * scaler1[1][idx_start:idx_end][:, None, None, None]) + 1, 
+                                   (selected_labels * scaler1[1][idx_start:idx_end][:, None, None, None]) + 1, 
+                                   data_range=2, size_average=True)
+                if verbose:
+                    loop_valid.set_description(f'Validation {epoch}')
+                    loop_valid.set_postfix(loss=loss.item())
+                
+
+        avg_train_loss.append(losses_train / len(train_dataloader))
+        avg_valid_loss.append(losses_valid / len(test_dataloader))
+        avg_train_psnr.append(psnr_train / len(train_dataloader))
+        avg_valid_psnr.append(psnr_valid / len(test_dataloader))
+        avg_train_ssim.append(ssim_train / len(train_dataloader))
+        avg_valid_ssim.append(ssim_valid / len(test_dataloader))
+        time_per_epoch.append(time.time() - epoch_time)
+        
+        loop_epoch.set_description(f'Epoch {epoch}')
+        loop_epoch.set_postfix(avg_valid_loss=avg_valid_loss[epoch])
+        
+        if verbose:
+            print("Epoch time: {:.2f} s".format(time.time() - epoch_time))
+            print("Total time elapsed: {:.2f} s".format(time.time() - total_time))
+            print("---------------------------------------")
+        
+        if config.wandb_log:
+            wandb.log({"avg_train_loss": avg_train_loss[epoch], 
+                    "avg_valid_loss": avg_valid_loss[epoch], 
+                    "avg_train_psnr": avg_train_psnr[epoch], 
+                    "avg_valid_psnr": avg_valid_psnr[epoch], 
+                    "avg_train_ssim": avg_train_ssim[epoch], 
+                    "avg_valid_ssim": avg_valid_ssim[epoch], 
+                    "time_per_epoch": time_per_epoch[epoch],
+                    "gpu_memory_used": gpu_memory_used, 
+                    "epoch": epoch, 
+                    "lr_epoch": lr_epoch[epoch]})
+        
+        if plot:
+            ax.cla()
+            ax.plot(np.arange(1, epoch+2), avg_train_loss,'b', label='Training Loss')
+            ax.plot(np.arange(1, epoch+2), avg_valid_loss, 'orange', label='Validation Loss')
+            ax.legend()
+            ax.set_title("Loss Curve")
+            ax.set_xlabel("Epoch")
+            ax.set_ylabel("Avg Loss")
+            f.canvas.draw()
+
+        if config.patience is not None:
+            early_stopping(-avg_valid_ssim[-1], model)
+
+            if early_stopping.early_stop:
+                print("Early stopping")
+                if config.wandb_log:
+                    wandb.log({"avg_train_loss": avg_train_loss[epoch-config.patience], 
+                            "avg_valid_loss": avg_valid_loss[epoch-config.patience], 
+                            "avg_train_psnr": avg_train_psnr[epoch-config.patience], 
+                            "avg_valid_psnr": avg_valid_psnr[epoch-config.patience], 
+                            "avg_train_ssim": avg_train_ssim[epoch-config.patience], 
+                            "avg_valid_ssim": avg_valid_ssim[epoch-config.patience]})
+                break
+    
+    if config.patience is not None:
+        model.load_state_dict(torch.load(checkpoint))
+
+    return model, avg_train_loss, avg_valid_loss, time_per_epoch

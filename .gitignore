@@ -29,3 +29,5 @@ experiment*.sh
 
 # WandB files #
 wandb/
+# Sweep config #
+sweep_config.yaml 

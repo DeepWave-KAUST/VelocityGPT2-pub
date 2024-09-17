@@ -175,11 +175,11 @@ def resize_image(image, image_size=None, inv=False, orig_image_size=None):
     
     return image
 
-def resize_image2(image, image_size=None, inv=False, orig_image_size=None):
+def resize_image2(image, image_size=None, inv=False, orig_image_size=None, anti_aliasing=False, order=0):
     if not inv and image_size is not None:
-        image = resize(image, image_size, order=0, anti_aliasing=False, preserve_range=True)
+        image = resize(image, image_size, order=order, anti_aliasing=anti_aliasing, preserve_range=True)
     elif inv and orig_image_size is not None:
-        image = resize(image, orig_image_size, order=0, anti_aliasing=False, preserve_range=True)
+        image = resize(image, orig_image_size, order=order, anti_aliasing=anti_aliasing, preserve_range=True)
     
     return image
 

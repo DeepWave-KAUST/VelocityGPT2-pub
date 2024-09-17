@@ -132,6 +132,15 @@ class FocalFrequencyLoss(nn.Module):
         # calculate focal frequency loss
         return self.loss_formulation(pred_freq, target_freq, matrix) * self.loss_weight
     
+class SSIMLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        
+    def forward(self, x, y):
+        loss = (1 - ssim(x.unsqueeze(1) + 1, y.unsqueeze(1) + 1, data_range=2, size_average=True))
+        
+        return loss
+    
 class VectorQuantizedVAELoss(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -206,3 +215,21 @@ class FSQLoss(nn.Module):
                 
         return loss
     
+class WDSRLoss(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        if config.recon_loss_fn == "l2":
+            self.recon_loss_fn = nn.MSELoss()
+        elif config.recon_loss_fn == "l1":
+            self.recon_loss_fn = nn.L1Loss()
+        elif config.recon_loss_fn == "ssim":
+            self.recon_loss_fn = SSIMLoss()
+        elif config.recon_loss_fn == "hybrid":
+            self.recon_loss_fn = HybridLoss(config)
+        elif config.recon_loss_fn == "hybrid2":
+            self.recon_loss_fn = HybridLoss2(config)
+        
+    def forward(self, x_tilde, images):
+        loss = self.recon_loss_fn(x_tilde, images)
+        
+        return loss

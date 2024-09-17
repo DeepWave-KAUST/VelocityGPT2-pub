@@ -34,6 +34,7 @@ from .datasets import _get_dip
 from .losses import *
 from .models import *
 from .quantizer import *
+from .upsampler import *
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -129,6 +130,7 @@ def load_and_prep(config):
                         data.data[key] = torch.cat((data.data[key], smoothed), dim=0)
                 
         if config.image_size != config.orig_image_size:
+            resize_keys = ['input', 'label'] if 'sr' not in config.training_stage else ['input']
             if config.pad_input:
                 # Pad
                 pad0 = int((config.image_size[1] - config.orig_image_size[1]) // 2)
@@ -137,16 +139,18 @@ def load_and_prep(config):
                 pad3 = int((config.image_size[0] - config.orig_image_size[0]) - pad2)
                 pad = [pad0, pad1, pad2, pad3]
                 for key in data.data.keys():
-                    if key in ['input', 'label']:
+                    if key in resize_keys:
                         data.data[key] = pad_input(data.data[key], pad)      
             else:
                 # Resize
                 for key in data.data.keys():
-                    if key in ['input', 'label']:
+                    if key in resize_keys:
                         resized_images = []
                         for j in range(len(data.data[key])):
                             resized_images.append(torch.tensor(resize_image2(data.data[key][j].numpy(), 
-                                                                             config.image_size)))
+                                                                            config.image_size, 
+                                                                            anti_aliasing=config.anti_aliasing,
+                                                                            order=config.order)))
                         data.data[key] = torch.stack(resized_images)
         # Compress
         if config.compress_class and config.compress_ratio:
@@ -274,7 +278,12 @@ def build_model(config):
         print(summary(model.to('cuda:0'), 
                     input_size=(config.batch_size, 1, config.image_size[0], config.image_size[1]), 
                     device=config.device))
-        
+    elif "sr" in config.training_stage:
+        model = WDSRModel(config)
+
+        print(summary(model.to('cuda:0'), 
+                    input_size=(config.batch_size, 1, config.image_size[0], config.image_size[1]), 
+                    device=config.device))
     else:
         model = GPT2(config)
         print(model)
@@ -351,6 +360,8 @@ def build_loss_fn(config):
         loss_fn = VQVAELoss(config)
     elif config.loss == "fsq":
         loss_fn = FSQLoss(config)
+    elif config.loss == "wdsr":
+        loss_fn = WDSRLoss(config)
 
     return loss_fn
 

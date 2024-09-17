@@ -304,3 +304,70 @@ def plot_example2(model, data, scaler1, pad, config, idx, log=False, prefix=0):
             wandb.log({"plot_{}_{}".format(prefix, i+1): f})
             
         print(latents)
+
+def plot_example3(model, data, scaler1, pad, config, idx, scaler=1, log=False, prefix=0):
+    device = config.device
+    dx = 1
+    dt = 0.001
+    x0 = 0.
+        
+    model.eval()
+
+    for i in range(len(idx)): 
+        inputs = data.data['input'][[idx[i]]].to(config.device)
+        labels = data.data['label'][[idx[i]]].to(config.device)
+        
+#         inputs = _to_sequence(inputs, config)
+        with torch.no_grad():
+            x_tilde = model(inputs.unsqueeze(1))
+        
+#         inputs = _to_sequence(inputs, config, inv=True)
+        sample_output = x_tilde.squeeze(1)
+        inputs = ((inputs / config.scaler2) + config.scaler3) * scaler1[[idx[i]]][:, None, None]
+        sample_output = ((sample_output  / config.scaler2) + config.scaler3) * scaler1[[idx[i]]][:, None, None]
+        labels = ((labels  / config.scaler2) + config.scaler3) * scaler1[[idx[i]]][:, None, None]
+        if config.image_size != config.orig_image_size and config.revert:
+            if config.pad_input:
+                orig_shape = (1, config.orig_image_size[0], config.orig_image_size[1])
+                inputs = pad_input(inputs, pad, inv=True, orig_shape=orig_shape)
+                sample_output = pad_input(sample_output, pad, inv=True, orig_shape=orig_shape)
+                labels = pad_input(labels, pad, inv=True, orig_shape=orig_shape)
+            else:
+                inputs = torch.tensor(resize_image2(inputs[0].cpu().numpy(), 
+                                                    config.orig_image_size))
+                sample_output = torch.tensor(resize_image2(sample_output[0].cpu().numpy(), 
+                                                           config.orig_image_size))
+                labels = torch.tensor(resize_image2(labels[0].cpu().numpy(), 
+                                                    config.orig_image_size))
+        
+        X = inputs.squeeze().cpu()
+        y = sample_output.squeeze().cpu()
+        z = labels.squeeze().cpu()
+                
+        f, ax = plt.subplots(1, 4, figsize=(20, 5), sharey=False, sharex=False)
+        im1 = ax[0].imshow(X.detach().T * scaler, aspect=1, vmin=1500, vmax=4500, cmap='terrain')
+        ax[0].set_title("Input")
+        ax[0].set_xlabel("X")
+        ax[0].set_ylabel("Z")
+        f.colorbar(im1, fraction=0.046, pad=0.04)
+        
+        im2 = ax[1].imshow(y.detach().T * scaler, aspect=1, vmin=1500, vmax=4500, cmap='terrain')
+        error = nn.MSELoss()(y, z)
+        ax[1].set_title("Output (MSE: {:.3})".format(error))
+        ax[1].set_xlabel("X")
+        f.colorbar(im2, fraction=0.046, pad=0.04)
+        
+        im3 = ax[2].imshow(z.detach().T * scaler, aspect=1, vmin=1500, vmax=4500, cmap='terrain')
+        ax[2].set_title("Label")
+        ax[2].set_xlabel("X")
+        f.colorbar(im3, fraction=0.046, pad=0.04)
+        
+        diff = (z - y)
+        im4 = ax[3].imshow(diff.detach().T * scaler, aspect=1, vmin=-500, vmax=500, cmap='terrain')
+        ax[3].set_title("(Label - Output)")
+        ax[3].set_xlabel("X")
+        f.colorbar(im4, fraction=0.046, pad=0.04)
+        
+        f.savefig(os.path.join(config.parent_dir, "example_prediction_{}_{}.png").format(prefix, i+1))
+        if log:
+            wandb.log({"plot_{}_{}".format(prefix, i+1): f})

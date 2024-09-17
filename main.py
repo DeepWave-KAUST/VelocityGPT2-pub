@@ -7,8 +7,8 @@ from velocitygpt.pipeline import *
 from velocitygpt.datasets import *
 from velocitygpt.modules import *
 from velocitygpt.quantizer import *
-from velocitygpt.train import run_velenc, run_velgen
-from velocitygpt.vis import plot_example, plot_example2
+from velocitygpt.train import run_velenc, run_velgen, run_velup
+from velocitygpt.vis import plot_example, plot_example2, plot_example3
 from pathlib import Path
 
 def parse_list_of_lists(arg_value):
@@ -95,6 +95,12 @@ def parse_args():
     parser.add_argument('--well_cond_prob', type=float, default=0.9)
     parser.add_argument('--add_dip_to_well', action='store_true')
 
+    # SR model parameters
+    parser.add_argument('--scale', type=int, default=4)
+    parser.add_argument('--n_resblocks', type=int, default=8)
+    parser.add_argument('--n_feats', type=int, default=128)
+    parser.add_argument('--res_scale', type=int, default=1)
+
     # Training parameters
     parser.add_argument('--training_stage', type=str, required=True)
     parser.add_argument('--parent_dir', type=str, default='.', help="Saving directory")
@@ -144,6 +150,8 @@ def parse_args():
     parser.add_argument('--scaler3', type=float, default=0.5)
     parser.add_argument('--vqvae_dir', type=str, default=None)
     parser.add_argument('--vqvae_refl_dir', type=None, default=None)
+    parser.add_argument('--anti_aliasing', action='store_true')
+    parser.add_argument('--order', type=int, default=0)
 
     # WandB parameters
     parser.add_argument('--wandb_log', action='store_true')
@@ -159,7 +167,7 @@ def main(args):
     setup(args)
     train_data, test_data, scaler1, pad = load_and_prep(args)
     train_dataloader, test_dataloader = build_dataloader(args, train_data, test_data)
-    if "vqvae" not in args.training_stage:
+    if "vqvae" not in args.training_stage and "sr" not in args.training_stage:
         vqvae_model = load_model(args)
         if args.vqvae_refl_dir is not None:
             vqvae_refl_model = load_model(args, model_type="refl")
@@ -180,6 +188,12 @@ def main(args):
                     args, verbose=False)
         plot_example2(model, train_data, scaler1[0], pad, args, [0], log=args.wandb_log, prefix=1)
         plot_example2(model, test_data, scaler1[1], pad, args, [0], log=args.wandb_log, prefix=2)
+    if "sr" in args.training_stage:
+        model, avg_train_loss, avg_valid_loss, time_per_epoch = \
+            run_velup(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_dataloader, scaler1,
+                    args, verbose=False)
+        plot_example3(model, train_data, scaler1[0], pad, args, [0], log=args.wandb_log, prefix=1)
+        plot_example3(model, test_data, scaler1[1], pad, args, [0], log=args.wandb_log, prefix=2)
     else:
         model, avg_train_loss, avg_valid_loss, time_per_epoch = \
             run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, loss_fn, train_dataloader, 

@@ -207,7 +207,7 @@ def load_and_prep(config):
                                                 torch.flip(data.data[key], dims=(1,))), dim=0)
                 elif key == 'dip_seq':
                     dip_seq_flip = data.data[key].clone()
-                    dip_seq_flip = dip_seq_flip.reshape(-1, config.latent_dim, config.latent_dim)
+                    dip_seq_flip = dip_seq_flip.reshape(-1, config.latent_dim[1], config.latent_dim[0])
                     dip_seq_flip = torch.flip(dip_seq_flip, dims=(2,))
                     dip_seq_flip = dip_seq_flip.reshape(dip_seq_flip.shape[0], -1)
                     data.data[key] = torch.cat((data.data[key], dip_seq_flip), dim=0)
@@ -298,7 +298,7 @@ def build_model(config):
         cls = torch.randint(high=config.num_classes, size=(config.batch_size,))
         if config.well_cond_prob > 0:
             well_pos = torch.randint(high=config.image_size[0], size=(config.batch_size,))
-            latents_well = torch.randint(high=config.vocab_size, size=(config.latent_dim, config.batch_size))
+            latents_well = torch.randint(high=config.vocab_size, size=(config.latent_dim[1], config.batch_size))
             input_data = [latents, cls, well_pos, latents_well]
         else:
             well_pos = None
@@ -315,7 +315,7 @@ def build_model(config):
         else:
             input_data.append(None)
         if config.add_dip_to_well:
-            dip_well = torch.randint(high=len(config.dip_bins), size=(config.batch_size, config.latent_dim))
+            dip_well = torch.randint(high=len(config.dip_bins), size=(config.batch_size, config.latent_dim[1]))
             input_data.append(dip_well)
         else:
             input_data.append(None)

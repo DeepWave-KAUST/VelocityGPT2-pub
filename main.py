@@ -66,7 +66,7 @@ def parse_args():
     parser.add_argument('--latent_noise_factor', type=float, default=0.1)
 
     # GPT Model parameters
-    parser.add_argument('--latent_dim', type=int, default=16)
+    parser.add_argument('--latent_dim', type=int, nargs=2, default=[16, 16])
     parser.add_argument('--vocab_size', type=int, default=128)
     parser.add_argument('--refl_vocab_size', type=int, default=128)
     parser.add_argument('--type_vocab_size', type=int, default=2)
@@ -214,7 +214,7 @@ def main(args):
 if __name__ == "__main__":
     args = parse_args()
     args.max_position_embeddings = args.max_length + \
-                                (args.latent_dim + 1) * math.ceil(args.well_cond_prob) + \
+                                (args.latent_dim[1] + 1) * math.ceil(args.well_cond_prob) + \
                                 args.use_dip + \
                                 int(0 if args.vqvae_refl_dir is None else 1)
     if args.wandb_log:

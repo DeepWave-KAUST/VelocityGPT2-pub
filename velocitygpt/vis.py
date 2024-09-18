@@ -90,7 +90,7 @@ def plot_example(vqvae_model, vqvae_refl_model, model, data, scaler1, pad, confi
         if config.well_cond_prob > 0:
             if well_pos is None:
                 well_pos_inp = torch.tensor([config.image_size[0]]).to(config.device)
-                well_token = config.vocab_size * torch.ones((config.latent_dim, 1)).long().to(config.device)
+                well_token = config.vocab_size * torch.ones((config.latent_dim[1], 1)).long().to(config.device)
             elif well_pos is not None:
                 print(well_pos[[i]])
                 well_pos_inp = well_pos[[i]]
@@ -106,7 +106,7 @@ def plot_example(vqvae_model, vqvae_refl_model, model, data, scaler1, pad, confi
         if config.add_dip_to_well and config.use_dip and config.well_cond_prob:
             well_pos2 = torch.clamp(well_pos_inp.clone(), max=config.image_size[0]-1) 
             dip_well = dip.clone()
-            dip_well = dip_well.view(dip_well.shape[0], config.latent_dim, config.latent_dim)[range(len(well_pos2)), :, well_pos2//config.factor]
+            dip_well = dip_well.view(dip_well.shape[0], config.latent_dim[1], config.latent_dim[0])[range(len(well_pos2)), :, well_pos2//config.factor]
             dip_well = dip_well.view(dip_well.shape[0], -1)
         else:
             dip_well = None
@@ -130,7 +130,7 @@ def plot_example(vqvae_model, vqvae_refl_model, model, data, scaler1, pad, confi
                                  well_pos_inp, well_token, dip, latents_refl, dip_well)
 
         # # Transform back to image
-        orig_shape = (orig_shape[0], orig_shape[1], int(orig_shape[2]+(length/config.latent_dim)))
+        orig_shape = (orig_shape[0], orig_shape[1], int(orig_shape[2]+(length/config.latent_dim[1])))
         preds = _to_sequence2(preds, inv=True, orig_shape=orig_shape)
         with torch.no_grad():
             preds = vqvae_model.decode(preds).squeeze(1)

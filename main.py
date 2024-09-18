@@ -51,6 +51,8 @@ def parse_args():
     parser.add_argument('--freq', type=float, default=20)
     parser.add_argument('--nt0', type=int, default=64)
     parser.add_argument('--ntwav', type=int, default=63)
+    parser.add_argument('--transform_gaussian_kernel', type=int, nargs=2, default=[0, 0])
+    parser.add_argument('--transform_gaussian_sigma', type=float, nargs=2, default=[0, 0])
 
     # VQVAE Model parameters
     parser.add_argument('--vq_type', type=str, default='vqvae')

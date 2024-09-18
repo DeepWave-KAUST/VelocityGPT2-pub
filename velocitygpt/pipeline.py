@@ -227,6 +227,13 @@ def load_and_prep(config):
 #                 dip.append(dip_)
 #             dip = torch.stack(dip, dim=0)
 #             data.data['dip'] = dip
+
+        transform = create_transforms(config)
+        if hasattr(data, 'transform'):
+            if data.transform is None:
+                data.transform = transform
+        else:
+            data.transform = transform
                   
         if config.norm_mode == "independent":
             scaler1.append(torch.abs(data.data['input']).max(-1).values.max(-1).values)

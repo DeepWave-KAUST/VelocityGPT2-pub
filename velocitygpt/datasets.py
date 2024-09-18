@@ -1,19 +1,52 @@
 import torch
 import torch.nn.functional as F
+from torchvision import transforms
 import numpy as np
 from skimage.transform import resize
 import multiprocessing
 import pylops
 
 class ElasticGPTDataset(torch.utils.data.Dataset):
-    """PyTorch Dataset wrapper for ElasticGPT."""
+    """PyTorch Dataset wrapper for ElasticGPT with flexible transformations."""
 
-    def __init__(self, data):
+    def __init__(self, data, transform=None):
         self.data = data
+        self.transform = transform  # Accept a transform or None
+
     def __getitem__(self, idx):
-        return {key: val[idx].clone().detach() for key, val in self.data.items()}
+        sample = {key: val[idx].clone().detach() for key, val in self.data.items()}
+        
+        # Apply the transform if specified
+        if self.transform:
+            sample['input'] = self.transform(sample['input'].unsqueeze(0)).squeeze(0)
+        
+        return sample
+
     def __len__(self):
         return len(self.data['input'])
+    
+# Define the Gaussian Blur Transform
+def get_gaussian_blur_transform(kernel_size, sigma):
+    return transforms.GaussianBlur(kernel_size=kernel_size, sigma=sigma)
+
+# Function to create a list of transforms based on arguments
+def create_transforms(args):
+    transform_list = []
+    
+    # Add Gaussian blur if specified
+    if sum(args.transform_gaussian_sigma) > 0:
+        transform_list.append(get_gaussian_blur_transform(kernel_size=args.transform_gaussian_kernel,
+                                                          sigma=args.transform_gaussian_sigma))
+    
+    # Add more transformations as needed, e.g., random crop, normalization, etc.
+    # Example:
+    # if args.random_crop:
+    #     transform_list.append(transforms.RandomCrop(args.crop_size))
+    
+    if transform_list:
+        return transforms.Compose(transform_list)
+    else:
+        return None  # No transform if the list is empty
 
 def SeisPWD(in_data, w1=5, w2=5, dz_in=1, dx_in=1, format="angle"):
     # dip estimation by Plane Wave Destruction

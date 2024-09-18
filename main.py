@@ -190,7 +190,7 @@ def main(args):
                     args, verbose=False)
         plot_example2(model, train_data, scaler1[0], pad, args, [0], log=args.wandb_log, prefix=1)
         plot_example2(model, test_data, scaler1[1], pad, args, [0], log=args.wandb_log, prefix=2)
-    if "sr" in args.training_stage:
+    elif "sr" in args.training_stage:
         model, avg_train_loss, avg_valid_loss, time_per_epoch = \
             run_velup(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_dataloader, scaler1,
                     args, verbose=False)

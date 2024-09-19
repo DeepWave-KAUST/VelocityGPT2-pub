@@ -130,7 +130,7 @@ def plot_example(vqvae_model, vqvae_refl_model, model, data, scaler1, pad, confi
                                  well_pos_inp, well_token, dip, latents_refl, dip_well)
 
         # # Transform back to image
-        orig_shape = (orig_shape[0], orig_shape[1], int(orig_shape[2]+(length/config.latent_dim[1])))
+        orig_shape = (orig_shape[0], orig_shape[1], int(orig_shape[2]+(length/config.latent_dim[0])))
         preds = _to_sequence2(preds, inv=True, orig_shape=orig_shape)
         with torch.no_grad():
             preds = vqvae_model.decode(preds).squeeze(1)

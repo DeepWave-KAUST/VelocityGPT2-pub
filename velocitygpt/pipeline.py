@@ -105,6 +105,9 @@ def load_and_prep(config):
         if not config.use_dip:
             try:
                 del data.data["dip"]
+            except:
+                pass
+            try:
                 del data.data["dip_seq"]
             except:
                 pass
@@ -294,31 +297,48 @@ def build_model(config):
     else:
         model = GPT2(config)
         print(model)
+        
+        # Create input tensors with mock values
         latents = torch.randint(high=config.vocab_size, size=(config.max_length, config.batch_size))
         cls = torch.randint(high=config.num_classes, size=(config.batch_size,))
+        
+        # Create input_data with default mock values
+        input_data = [latents, cls]
+        
         if config.well_cond_prob > 0:
             well_pos = torch.randint(high=config.image_size[0], size=(config.batch_size,))
             latents_well = torch.randint(high=config.vocab_size, size=(config.latent_dim[1], config.batch_size))
-            input_data = [latents, cls, well_pos, latents_well]
         else:
-            well_pos = None
-            latents_well = None
-            input_data = [latents, cls, well_pos, latents_well]
+            # Create mock tensors for well_pos and latents_well with appropriate sizes
+            well_pos = torch.zeros(config.batch_size, dtype=torch.long)
+            latents_well = torch.zeros(config.latent_dim[1], config.batch_size, dtype=torch.long)
+        
+        input_data.extend([well_pos, latents_well])
+        
         if config.use_dip:
             dip = torch.randint(high=len(config.dip_bins), size=(config.batch_size, config.max_length))
-            input_data.append(dip)
         else:
-            input_data.append(None)
+            # Create a mock tensor for dip with appropriate size
+            dip = torch.zeros(config.batch_size, config.max_length, dtype=torch.long)
+        
+        input_data.append(dip)
+        
         if config.vqvae_refl_dir is not None:
             refl = torch.randint(high=config.refl_vocab_size, size=(config.max_length, config.batch_size))
-            input_data.append(refl)
         else:
-            input_data.append(None)
+            # Create a mock tensor for refl with appropriate size
+            refl = torch.zeros(config.max_length, config.batch_size, dtype=torch.long)
+        
+        input_data.append(refl)
+        
         if config.add_dip_to_well:
             dip_well = torch.randint(high=len(config.dip_bins), size=(config.batch_size, config.latent_dim[1]))
-            input_data.append(dip_well)
         else:
-            input_data.append(None)
+            # Create a mock tensor for dip_well with appropriate size
+            dip_well = torch.zeros(config.batch_size, config.latent_dim[1], dtype=torch.long)
+        
+        input_data.append(dip_well)
+        
         print(summary(model.to(config.device), 
                     input_data=input_data, 
                     device=config.device))

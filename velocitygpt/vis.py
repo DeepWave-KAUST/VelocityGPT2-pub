@@ -85,7 +85,9 @@ def plot_example(vqvae_model, vqvae_refl_model, model, data, scaler1, pad, confi
             data.transform.transforms = [t for t in data.transform.transforms if 
                                          any([isinstance(t, Normalization)])]
             inputs = data[idx[i]]['input']['tensor'].unsqueeze(0).to(config.device)
-            labels = data[idx[i]]['label']['tensor'].unsqueeze(0).to(config.device)
+            labels = inputs.clone()
+            if config.vqvae_refl_dir is not None:
+                refl = data[idx[i]]['label']['tensor'].unsqueeze(0).to(config.device)
         else:
             inputs = data.data['input'][[idx[i]]].to(config.device)
             labels = data.data['label'][[idx[i]]].to(config.device)
@@ -235,7 +237,7 @@ def plot_example2(model, data, scaler1, pad, config, idx, log=False, prefix=0):
             data.transform.transforms = [t for t in data.transform.transforms if 
                                          any([isinstance(t, Normalization)])]
             inputs = data[idx[i]]['input']['tensor'].unsqueeze(0).to(config.device)
-            labels = data[idx[i]]['label']['tensor'].unsqueeze(0).to(config.device)
+            labels = inputs.clone()
         else:
             inputs = data.data['input'][[idx[i]]].to(config.device)
             labels = data.data['label'][[idx[i]]].to(config.device)

@@ -65,7 +65,7 @@ def load_and_prep(config):
                 else:
                     train_data_ = torch.load(os.path.join(path, 'train_data.pt'))
                     test_data_ = torch.load(os.path.join(path, 'test_data.pt'))
-                    if config.classify or config.cls_token and 'cls' not in train_data.data.keys():
+                    if config.classify or config.cls_token and 'cls' not in train_data_.data.keys():
                         for data in [train_data_, test_data_]:
                             data.data['cls'] = i * torch.ones(data.data['input'].shape[0]).long()
                     for data, data_ in zip([train_data, test_data], [train_data_, test_data_]):

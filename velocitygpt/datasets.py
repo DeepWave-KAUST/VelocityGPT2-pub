@@ -18,7 +18,7 @@ class ElasticGPTDataset(torch.utils.data.Dataset):
                 range = {'y': (0, config.train_prop*config.prop)} 
             else:
                 range = {'y': (config.train_prop*config.prop, 1*config.prop)}
-            paths = [{'data': dp, 'label': dp, 'order': ('y', 'z', 'x'), 'range': range} for dp in config.dataset_path]
+            paths = [{'data': dp, 'label': lp, 'order': ('y', 'z', 'x'), 'range': range} for [dp, lp] in config.dataset_path]
             self.data = NpyDataset(paths=paths,
                                    norm=0,
                                    window_w=config.image_size[0],
@@ -84,27 +84,25 @@ class Normalization:
         for i, nm in enumerate(self.norm_mode):
             if nm == "max":
                 for j, td in enumerate([tensor1, tensor2]):
-                    if j == 0:
-                        if self.norm_level == "trace":
-                            max_val = td['tensor'].max(dim=1, keepdim=True).values
-                        elif self.norm_level == "sample":
-                            max_val = td['tensor'].max().reshape(-1, 1)
-                        else:
-                            max_val = torch.tensor(self.norm_const).reshape(-1, 1)
+                    if self.norm_level == "trace":
+                        max_val = td['tensor'].max(dim=1, keepdim=True).values
+                    elif self.norm_level == "sample":
+                        max_val = td['tensor'].max().reshape(-1, 1)
+                    else:
+                        max_val = torch.tensor(self.norm_const[j]).reshape(-1, 1)
                     td['max'] = max_val
                     td['tensor'] /= (td['max'] + 1e-8)
             if nm == "mean_std":
                 for j, td in enumerate([tensor1, tensor2]):
-                    if j == 0:
-                        if self.norm_level == "sample":
-                            mean_val = td['tensor'].mean(dim=[0, 1], keepdim=True)
-                            std_val = td['tensor'].std(dim=[0, 1], keepdim=True)
-                        elif self.norm_level == "trace":
-                            mean_val = td['tensor'].mean(dim=[1], keepdim=True)
-                            std_val = td['tensor'].std(dim=[1], keepdim=True)
-                        else:
-                            mean_val = torch.tensor(self.scaler3).reshape(-1, 1)
-                            std_val = torch.tensor(self.scaler2).reshape(-1, 1)
+                    if self.norm_level == "sample":
+                        mean_val = td['tensor'].mean(dim=[0, 1], keepdim=True)
+                        std_val = td['tensor'].std(dim=[0, 1], keepdim=True)
+                    elif self.norm_level == "trace":
+                        mean_val = td['tensor'].mean(dim=[1], keepdim=True)
+                        std_val = td['tensor'].std(dim=[1], keepdim=True)
+                    else:
+                        mean_val = torch.tensor(self.scaler3[j]).reshape(-1, 1)
+                        std_val = torch.tensor(self.scaler2[j]).reshape(-1, 1)
                     td['mean'] = mean_val
                     td['std'] = std_val
                     td['tensor'] = (td['tensor'] - td['mean']) / (td['std'] + 1e-8)  # Add epsilon to avoid division by zero

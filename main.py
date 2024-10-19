@@ -15,6 +15,9 @@ def parse_list_of_lists(arg_value):
     # Assume the input is given in a specific format, like "1,2,3;4,5,6;7,8"
     return [list(map(int, group.split(','))) for group in arg_value.split(';')]
 
+def parse_list_of_lists2(arg_value):
+    # Assume the input is given in a specific format, like "1,2,3;4,5,6;7,8"
+    return [list(map(str, group.split(','))) for group in arg_value.split(';')]
 
 def parse_range(value):
     range_list = []
@@ -35,10 +38,10 @@ def parse_range(value):
 def parse_args():
     parser = argparse.ArgumentParser(description="StorSeismic Fine-tune Denoising")
     # Data parameters
-    parser.add_argument('--dataset', nargs='+', type=str, required=True)
+    parser.add_argument('--dataset', type=parse_list_of_lists2, required=True)
     parser.add_argument('--prop', type=float, default=1)
     parser.add_argument('--train_prop', type=float, default=None)
-    parser.add_argument('--dataset_path', nargs='+', type=str, required=True)
+    parser.add_argument('--dataset_path', type=parse_list_of_lists2, required=True)
     parser.add_argument('--dataset_type', type=str, default='syn1')
     parser.add_argument('--image_size', type=int, nargs=2, default=[64, 64])
     parser.add_argument('--orig_image_size', type=int, nargs=2, default=[64, 64])
@@ -47,7 +50,7 @@ def parse_args():
     parser.add_argument('--input_type', type=str, default='img')
     parser.add_argument('--num_classes', type=int, default=10)
     parser.add_argument('--norm_mode', type=str, nargs='+', default=['independent'])
-    parser.add_argument('--norm_const', type=float, default=4500)
+    parser.add_argument('--norm_const', type=float, nargs='+', default=[4500])
     parser.add_argument('--norm_level', type=str, default='sample')
     parser.add_argument('--dt0', type=float, default=0.016)
     parser.add_argument('--freq', type=float, default=20)
@@ -150,8 +153,8 @@ def parse_args():
     parser.add_argument('--smooth_class', type=parse_list_of_lists, default=[])
     parser.add_argument('--smooth', nargs='+', type=float, default=[])
     parser.add_argument('--dip_bins', type=parse_range, default=[])
-    parser.add_argument('--scaler2', type=int, default=2)
-    parser.add_argument('--scaler3', type=float, default=0.5)
+    parser.add_argument('--scaler2', type=int, nargs='+', default=[2])
+    parser.add_argument('--scaler3', type=float, nargs='+', default=[0.5])
     parser.add_argument('--vqvae_dir', type=str, default=None)
     parser.add_argument('--vqvae_refl_dir', type=None, default=None)
     parser.add_argument('--anti_aliasing', action='store_true')
@@ -224,6 +227,12 @@ if __name__ == "__main__":
                                 (args.latent_dim[1] + 1) * math.ceil(args.well_cond_prob) + \
                                 args.use_dip + \
                                 int(0 if args.vqvae_refl_dir is None else 1)
+    if args.dataset_type != 'fld2':
+        args.dataset = args.dataset[0]
+        args.dataset_path = args.dataset_path[0]
+        args.scaler2 = args.scaler2[0]
+        args.scaler3 = args.scaler3[0]
+        args.norm_const = args.norm_const[0]
     if args.wandb_log:
         wandb.login()
         wandb.init(config=args, project='ElasticGPT', 

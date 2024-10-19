@@ -72,8 +72,7 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
                 if config.dataset_type == "fld2":
                     batch['input'] = {k: v.to(device) for k, v in batch['input'].items()}
                     inputs = batch['input']['tensor']
-                    batch['label'] = {k: v.to(device) for k, v in batch['label'].items()}
-                    labels = batch['label']['tensor']
+                    labels = inputs.clone()
                 else:
                     inputs = batch['input'].to(config.device)
                     labels = batch['label'].to(config.device)
@@ -147,8 +146,7 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
                     if config.dataset_type == "fld2":
                         batch['input'] = {k: v.to(device) for k, v in batch['input'].items()}
                         inputs = batch['input']['tensor']
-                        batch['label'] = {k: v.to(device) for k, v in batch['label'].items()}
-                        labels = batch['label']['tensor']
+                        labels = inputs.clone()
                     else:
                         inputs = batch['input'].to(config.device)
                         labels = batch['label'].to(config.device)
@@ -296,8 +294,9 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                 if config.dataset_type == "fld2":
                     batch['input'] = {k: v.to(device) for k, v in batch['input'].items()}
                     inputs = batch['input']['tensor']
-                    batch['label'] = {k: v.to(device) for k, v in batch['label'].items()}
-                    labels = batch['label']['tensor']
+                    labels = inputs.clone()
+                    if config.vqvae_refl_dir is not None:
+                        refl = batch['label']['tensor'].to(device)
                     cls = None
                     dips = None
                 else:
@@ -457,8 +456,9 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                     if config.dataset_type == "fld2":
                         batch['input'] = {k: v.to(device) for k, v in batch['input'].items()}
                         inputs = batch['input']['tensor']
-                        batch['label'] = {k: v.to(device) for k, v in batch['label'].items()}
-                        labels = batch['label']['tensor']
+                        labels = inputs.clone()
+                        if config.vqvae_refl_dir is not None:
+                            refl = batch['label']['tensor'].to(device)
                         cls = None
                         dips = None
                     else:

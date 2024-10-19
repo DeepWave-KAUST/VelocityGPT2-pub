@@ -31,3 +31,8 @@ experiment*.sh
 wandb/
 # Sweep config #
 sweep_config.yaml 
+
+# Slurm
+*.slurm
+*.out
+dcgm

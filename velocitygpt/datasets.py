@@ -5,25 +5,115 @@ import numpy as np
 from skimage.transform import resize
 import multiprocessing
 import pylops
+from .NpyDataset import NpyDataset
 
 class ElasticGPTDataset(torch.utils.data.Dataset):
     """PyTorch Dataset wrapper for ElasticGPT with flexible transformations."""
 
-    def __init__(self, data, transform=None):
+    def __init__(self, data=None, transform=None, config=None, train=True):
         self.data = data
+        self.config = config
+        if self.config is not None and self.data is None:
+            if train:
+                range = {'y': (0, config.train_prop*config.prop)} 
+            else:
+                range = {'y': (config.train_prop*config.prop, 1*config.prop)}
+            paths = [{'data': dp, 'label': dp, 'order': ('y', 'z', 'x'), 'range': range} for dp in config.dataset_path]
+            self.data = NpyDataset(paths=paths,
+                                   norm=0,
+                                   window_w=config.image_size[0],
+                                   window_h=config.image_size[1], 
+                                   stride_w=config.stride[0], 
+                                   stride_h=config.stride[1],
+                                   mode='windowed', 
+                                   line_mode='xline')
         self.transform = transform  # Accept a transform or None
 
     def __getitem__(self, idx):
-        sample = {key: val[idx].clone().detach() for key, val in self.data.items()}
+        if hasattr(self, 'config'):
+            if self.config.dataset_type == "fld2":
+                sample = {}
+                sample['input'], sample['label'] = self.data[idx]
+                sample['input'] = torch.tensor(sample['input'].T).float()
+                sample['label'] = torch.tensor(sample['label'].T).float()
+            else:
+                sample = {key: val[idx].clone().detach() for key, val in self.data.items()}
+        else:
+            sample = {key: val[idx].clone().detach() for key, val in self.data.items()}
+
+        sample['input'] = {'tensor': sample['input']}
+        sample['label'] = {'tensor': sample['label']}
         
         # Apply the transform if specified
         if self.transform:
-            sample['input'] = self.transform(sample['input'].unsqueeze(0)).squeeze(0)
+            sample['input'], sample['label'] = self.transform(sample['input'], sample['label'])
         
         return sample
 
     def __len__(self):
-        return len(self.data['input'])
+        if hasattr(self, 'config'):
+            if self.config.dataset_type == "fld2":
+                return len(self.data)
+            else:
+                return len(self.data['input'])
+        else:
+            return len(self.data['input'])
+        
+    def denormalize(self, tensor_dict):
+        """Revert the normalization for visualization."""
+        denorm_mode = self.config.norm_mode[::-1]
+        for nm in denorm_mode:
+            if nm == 'max':
+                tensor_dict['tensor'] *= tensor_dict['max']
+            elif nm == 'mean_std':
+                tensor_dict['tensor'] = tensor_dict['tensor'] * tensor_dict['std'] + tensor_dict['mean']
+        return tensor_dict['tensor']
+
+class Normalization:
+    def __init__(self, config):
+        self.norm_mode = config.norm_mode
+        self.norm_level = config.norm_level
+        self.norm_const = config.norm_const
+        self.scaler2 = config.scaler2
+        self.scaler3 = config.scaler3
+    def __call__(self, tensor1, tensor2):
+        for i, nm in enumerate(self.norm_mode):
+            if nm == "max":
+                for j, td in enumerate([tensor1, tensor2]):
+                    if j == 0:
+                        if self.norm_level == "trace":
+                            max_val = td['tensor'].max(dim=1, keepdim=True).values
+                        elif self.norm_level == "sample":
+                            max_val = td['tensor'].max().reshape(-1, 1)
+                        else:
+                            max_val = torch.tensor(self.norm_const).reshape(-1, 1)
+                    td['max'] = max_val
+                    td['tensor'] /= (td['max'] + 1e-8)
+            if nm == "mean_std":
+                for j, td in enumerate([tensor1, tensor2]):
+                    if j == 0:
+                        if self.norm_level == "sample":
+                            mean_val = td['tensor'].mean(dim=[0, 1], keepdim=True)
+                            std_val = td['tensor'].std(dim=[0, 1], keepdim=True)
+                        elif self.norm_level == "trace":
+                            mean_val = td['tensor'].mean(dim=[1], keepdim=True)
+                            std_val = td['tensor'].std(dim=[1], keepdim=True)
+                        else:
+                            mean_val = torch.tensor(self.scaler3).reshape(-1, 1)
+                            std_val = torch.tensor(self.scaler2).reshape(-1, 1)
+                    td['mean'] = mean_val
+                    td['std'] = std_val
+                    td['tensor'] = (td['tensor'] - td['mean']) / (td['std'] + 1e-8)  # Add epsilon to avoid division by zero
+        return tensor1, tensor2  
+
+class DualTransform:
+    def __init__(self, transforms):
+        self.transforms = transforms
+    
+    def __call__(self, tensor1, tensor2):
+        for t in self.transforms:
+            tensor1, tensor2 = t(tensor1, tensor2)
+        return tensor1, tensor2
     
 # Define the Gaussian Blur Transform
 def get_gaussian_blur_transform(kernel_size, sigma):
@@ -37,14 +127,11 @@ def create_transforms(args):
     if sum(args.transform_gaussian_sigma) > 0:
         transform_list.append(get_gaussian_blur_transform(kernel_size=args.transform_gaussian_kernel,
                                                           sigma=args.transform_gaussian_sigma))
-    
-    # Add more transformations as needed, e.g., random crop, normalization, etc.
-    # Example:
-    # if args.random_crop:
-    #     transform_list.append(transforms.RandomCrop(args.crop_size))
+
+    transform_list.append(Normalization(args))
     
     if transform_list:
-        return transforms.Compose(transform_list)
+        return DualTransform(transform_list)
     else:
         return None  # No transform if the list is empty
 

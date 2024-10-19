@@ -43,10 +43,12 @@ def parse_args():
     parser.add_argument('--image_size', type=int, nargs=2, default=[64, 64])
     parser.add_argument('--orig_image_size', type=int, nargs=2, default=[64, 64])
     parser.add_argument('--patch_size', type=int, nargs=2, default=[4, 4])
+    parser.add_argument('--stride', type=int, nargs=2, default=[4, 4])
     parser.add_argument('--input_type', type=str, default='img')
     parser.add_argument('--num_classes', type=int, default=10)
-    parser.add_argument('--norm_mode', type=str, default='independent')
+    parser.add_argument('--norm_mode', type=str, nargs='+', default='independent')
     parser.add_argument('--norm_const', type=float, default=4500)
+    parser.add_argument('--norm_level', type=str, default='sample')
     parser.add_argument('--dt0', type=float, default=0.016)
     parser.add_argument('--freq', type=float, default=20)
     parser.add_argument('--nt0', type=int, default=64)
@@ -168,6 +170,8 @@ def main(args):
     set_mpl_params()
     setup(args)
     train_data, test_data, scaler1, pad = load_and_prep(args)
+    print("No. of training data samples: ", len(train_data))
+    print("No. of test data samples: ", len(test_data))
     train_dataloader, test_dataloader = build_dataloader(args, train_data, test_data)
     if "vqvae" not in args.training_stage and "sr" not in args.training_stage:
         vqvae_model = load_model(args)
@@ -188,8 +192,11 @@ def main(args):
         model, avg_train_loss, avg_valid_loss, time_per_epoch = \
             run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_dataloader, scaler1,
                     args, verbose=False)
-        plot_example2(model, train_data, scaler1[0], pad, args, [0], log=args.wandb_log, prefix=1)
-        plot_example2(model, test_data, scaler1[1], pad, args, [0], log=args.wandb_log, prefix=2)
+        idx_dict = {'syn1': [0], 'fld1': [0], 'fld2': [100]}
+        plot_example2(model, train_data, scaler1[0], pad, args, idx_dict[args.dataset_type], log=args.wandb_log, 
+                      prefix=1)
+        plot_example2(model, test_data, scaler1[1], pad, args, idx_dict[args.dataset_type], log=args.wandb_log, 
+                      prefix=2)
     elif "sr" in args.training_stage:
         model, avg_train_loss, avg_valid_loss, time_per_epoch = \
             run_velup(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_dataloader, scaler1,

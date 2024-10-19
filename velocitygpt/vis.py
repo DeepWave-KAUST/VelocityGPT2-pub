@@ -81,10 +81,16 @@ def plot_example(vqvae_model, vqvae_refl_model, model, data, scaler1, pad, confi
     model.eval()
 
     for i in range(len(idx)): 
-        inputs = data.data['input'][[idx[i]]].to(config.device)
-        labels = data.data['label'][[idx[i]]].to(config.device)
-        if config.vqvae_refl_dir is not None:
-            refl = data.data['refl'][[idx[i]]].to(config.device)
+        if config.dataset_type == "fld2":
+            data.transform.transforms = [t for t in data.transform.transforms if 
+                                         any([isinstance(t, Normalization)])]
+            inputs = data[idx[i]]['input']['tensor'].unsqueeze(0).to(config.device)
+            labels = data[idx[i]]['label']['tensor'].unsqueeze(0).to(config.device)
+        else:
+            inputs = data.data['input'][[idx[i]]].to(config.device)
+            labels = data.data['label'][[idx[i]]].to(config.device)
+            if config.vqvae_refl_dir is not None:
+                refl = data.data['refl'][[idx[i]]].to(config.device)
         well_pos_inp = None
         well_token = None
         if config.well_cond_prob > 0:
@@ -137,10 +143,16 @@ def plot_example(vqvae_model, vqvae_refl_model, model, data, scaler1, pad, confi
         # #         preds = _to_sequence(preds, inv=True, orig_shape=orig_shape)
         
         input_transformed = labels.clone() 
-        input_transformed = ((input_transformed / config.scaler2) + config.scaler3) * scaler1[[idx[i]]][:, None, None]
+        if config.dataset_type == "fld2":
+            input_transformed = data.denormalize({**data[idx[i]]['input'], 'tensor': input_transformed.cpu()})
+            sample_output = data.denormalize({**data[idx[i]]['input'], 'tensor': preds.cpu()})
+            labels = data.denormalize({**data[idx[i]]['input'], 'tensor': labels.cpu()})
+        else:
+            input_transformed = ((input_transformed / config.scaler2) + config.scaler3) * scaler1[[idx[i]]][:, None, None]
+            sample_output = ((preds  / config.scaler2) + config.scaler3) * scaler1[[idx[i]]][:, None, None]
+            labels = ((labels  / config.scaler2) + config.scaler3) * scaler1[[idx[i]]][:, None, None]
+
         input_transformed[:, :, idx_gen[i]:] = 0
-        sample_output = ((preds  / config.scaler2) + config.scaler3) * scaler1[[idx[i]]][:, None, None]
-        labels = ((labels  / config.scaler2) + config.scaler3) * scaler1[[idx[i]]][:, None, None]
         
         if config.image_size != config.orig_image_size and config.revert:
             if config.pad_input:
@@ -219,8 +231,14 @@ def plot_example2(model, data, scaler1, pad, config, idx, log=False, prefix=0):
     model.eval()
 
     for i in range(len(idx)): 
-        inputs = data.data['input'][[idx[i]]].to(config.device)
-        labels = data.data['label'][[idx[i]]].to(config.device)
+        if config.dataset_type == "fld2":
+            data.transform.transforms = [t for t in data.transform.transforms if 
+                                         any([isinstance(t, Normalization)])]
+            inputs = data[idx[i]]['input']['tensor'].unsqueeze(0).to(config.device)
+            labels = data[idx[i]]['label']['tensor'].unsqueeze(0).to(config.device)
+        else:
+            inputs = data.data['input'][[idx[i]]].to(config.device)
+            labels = data.data['label'][[idx[i]]].to(config.device)
         
 #         inputs = _to_sequence(inputs, config)
         with torch.no_grad():
@@ -233,9 +251,14 @@ def plot_example2(model, data, scaler1, pad, config, idx, log=False, prefix=0):
         
 #         inputs = _to_sequence(inputs, config, inv=True)
         sample_output = x_tilde.squeeze(1)
-        inputs = ((inputs / config.scaler2) + config.scaler3) * scaler1[[idx[i]]][:, None, None]
-        sample_output = ((sample_output  / config.scaler2) + config.scaler3) * scaler1[[idx[i]]][:, None, None]
-        labels = ((labels  / config.scaler2) + config.scaler3) * scaler1[[idx[i]]][:, None, None]
+        if config.dataset_type == "fld2":
+            inputs = data.denormalize({**data[idx[i]]['input'], 'tensor': inputs.cpu()})
+            sample_output = data.denormalize({**data[idx[i]]['input'], 'tensor': sample_output.cpu()})
+            labels = data.denormalize({**data[idx[i]]['input'], 'tensor': labels.cpu()})
+        else:
+            inputs = ((inputs / config.scaler2) + config.scaler3) * scaler1[[idx[i]]][:, None, None]
+            sample_output = ((sample_output  / config.scaler2) + config.scaler3) * scaler1[[idx[i]]][:, None, None]
+            labels = ((labels  / config.scaler2) + config.scaler3) * scaler1[[idx[i]]][:, None, None]
         if config.image_size != config.orig_image_size and config.revert:
             if config.pad_input:
                 orig_shape = (1, config.orig_image_size[0], config.orig_image_size[1])
@@ -257,7 +280,8 @@ def plot_example2(model, data, scaler1, pad, config, idx, log=False, prefix=0):
         vlims = {"vqvae-training": [1500, 4500], "vqvae-training-refl": [-1, 1]}
         vlims_diff = {"vqvae-training": [-500, 500], "vqvae-training-refl": [-0.2, 0.2]}
         cmaps = {"vqvae-training": "terrain", "vqvae-training-refl": "Greys"}
-        scalers = {"vqvae-training": 1, "vqvae-training-refl": 10}
+        scalers_2 = {'syn1': 10, 'fld1': 10, 'fld2': 1e-2}
+        scalers = {"vqvae-training": 1, "vqvae-training-refl": scalers_2[config.dataset_type]}
         
         f, ax = plt.subplots(1, 4, figsize=(20, 5), sharey=True, sharex=False)
         im1 = ax[0].imshow(X.detach().T * scalers[config.training_stage], 

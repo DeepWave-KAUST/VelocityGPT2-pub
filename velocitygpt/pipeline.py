@@ -245,11 +245,11 @@ def load_and_prep(config):
             else:
                 data.transform = transform
                     
-            if config.norm_mode == "independent":
+            if config.norm_mode[0] == "independent":
                 scaler1.append(torch.abs(data.data['input']).max(-1).values.max(-1).values)
-            elif config.norm_mode == "set":
+            elif config.norm_mode[0] == "set":
                 scaler1.append(torch.ones(data.data['input'].shape[0]) * data.data['input'].max())
-            elif config.norm_mode == "manual":
+            elif config.norm_mode[0] == "manual":
                 scaler1.append(torch.ones(data.data['input'].shape[0]) * config.norm_const)
             data.data['input'] = (data.data['input'] / scaler1[i][:, None, None] - config.scaler3) * config.scaler2
             data.data['label'] = (data.data['label'] / scaler1[i][:, None, None] - config.scaler3) * config.scaler2

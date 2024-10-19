@@ -38,15 +38,19 @@ class ElasticGPTDataset(torch.utils.data.Dataset):
                 sample['label'] = torch.tensor(sample['label'].T).float()
             else:
                 sample = {key: val[idx].clone().detach() for key, val in self.data.items()}
+
+            sample['input'] = {'tensor': sample['input']}
+            sample['label'] = {'tensor': sample['label']}
+
+            # Apply the transform if specified
+            if self.transform:
+                sample['input'], sample['label'] = self.transform(sample['input'], sample['label'])
         else:
             sample = {key: val[idx].clone().detach() for key, val in self.data.items()}
 
-        sample['input'] = {'tensor': sample['input']}
-        sample['label'] = {'tensor': sample['label']}
-        
-        # Apply the transform if specified
-        if self.transform:
-            sample['input'], sample['label'] = self.transform(sample['input'], sample['label'])
+            # Apply the transform if specified
+            if self.transform:
+                sample['input'] = self.transform(sample['input'].unsqueeze(0)).squeeze(0)
         
         return sample
 
@@ -128,7 +132,8 @@ def create_transforms(args):
         transform_list.append(get_gaussian_blur_transform(kernel_size=args.transform_gaussian_kernel,
                                                           sigma=args.transform_gaussian_sigma))
 
-    transform_list.append(Normalization(args))
+    if args.dataset_type == "fld2":
+        transform_list.append(Normalization(args))
     
     if transform_list:
         return DualTransform(transform_list)

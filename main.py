@@ -46,7 +46,7 @@ def parse_args():
     parser.add_argument('--stride', type=int, nargs=2, default=[4, 4])
     parser.add_argument('--input_type', type=str, default='img')
     parser.add_argument('--num_classes', type=int, default=10)
-    parser.add_argument('--norm_mode', type=str, nargs='+', default='independent')
+    parser.add_argument('--norm_mode', type=str, nargs='+', default=['independent'])
     parser.add_argument('--norm_const', type=float, default=4500)
     parser.add_argument('--norm_level', type=str, default='sample')
     parser.add_argument('--dt0', type=float, default=0.016)

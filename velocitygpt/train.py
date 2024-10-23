@@ -222,7 +222,7 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
                 f.canvas.draw()
 
             if config.patience is not None:
-                early_stopping(-avg_valid_ssim[-1], model)
+                early_stopping(-avg_valid_ssim[-1], model, optim=optim, scheduler=scheduler)
 
                 if early_stopping.early_stop:
                     print("Early stopping")
@@ -236,11 +236,17 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
                     break
         
         if config.patience is not None:
-            model.load_state_dict(torch.load(checkpoint))
+            model.load_state_dict(torch.load(checkpoint)['model'])
+            optim.load_state_dict(torch.load(checkpoint)['optim'])
+            if scheduler is not None:
+                scheduler.load_state_dict(torch.load(checkpoint)['scheduler'])
     
     except KeyboardInterrupt:
         print("Stopped training, returning to last checkpoint...")
-        model.load_state_dict(torch.load(checkpoint))
+        model.load_state_dict(torch.load(checkpoint)['model'])
+        optim.load_state_dict(torch.load(checkpoint)['optim'])
+        if scheduler is not None:
+            scheduler.load_state_dict(torch.load(checkpoint)['scheduler'])
         
     return model, avg_train_loss, avg_valid_loss, time_per_epoch
 
@@ -629,7 +635,7 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                 f.canvas.draw()
 
             if config.patience is not None:
-                early_stopping(avg_valid_loss[-1], model)
+                early_stopping(avg_valid_loss[-1], model, optim=optim, scheduler=scheduler)
 
                 if early_stopping.early_stop:
                     print("Early stopping")
@@ -649,11 +655,17 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                     break
         
         if config.patience is not None:
-            model.load_state_dict(torch.load(checkpoint))
+            model.load_state_dict(torch.load(checkpoint)['model'])
+            optim.load_state_dict(torch.load(checkpoint)['optim'])
+            if scheduler is not None:
+                scheduler.load_state_dict(torch.load(checkpoint)['scheduler'])
     
     except KeyboardInterrupt:
         print("Stopped training, returning to last checkpoint...")
-        model.load_state_dict(torch.load(checkpoint))
+        model.load_state_dict(torch.load(checkpoint)['model'])
+        optim.load_state_dict(torch.load(checkpoint)['optim'])
+        if scheduler is not None:
+            scheduler.load_state_dict(torch.load(checkpoint)['scheduler'])
 
     return model, avg_train_loss, avg_valid_loss, time_per_epoch
 

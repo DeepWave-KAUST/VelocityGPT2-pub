@@ -234,105 +234,110 @@ def plot_example2(model, data, scaler1, pad, config, idx, log=False, prefix=0):
     x0 = 0.
         
     model.eval()
-
+    
+    training_stage = [config.training_stage, 'vqvae-training-refl']
+    input_key = ['input', 'label']
     for i in range(len(idx)): 
-        if config.dataset_type == "fld2":
-            data.transform.transforms = [t for t in data.transform.transforms if 
-                                         any([isinstance(t, Normalization)])]
-            inputs = data[idx[i]]['input']['tensor'].unsqueeze(0).to(config.device)
-            labels = inputs.clone()
-        else:
-            inputs = data.data['input'][[idx[i]]].to(config.device)
-            labels = data.data['label'][[idx[i]]].to(config.device)
-        
-#         inputs = _to_sequence(inputs, config)
-        with torch.no_grad():
-            if config.vq_type == "vqvae":
-                x_tilde, z_e_x, z_q_x = model(inputs.unsqueeze(1))
-                latents = model.encode(inputs.unsqueeze(1))
-            elif config.vq_type == "vqvae2":
-                x_tilde, latent_loss = model(inputs.unsqueeze(1))
-                _, _, _, *latents = model.encode(inputs.unsqueeze(1))
-        
-#         inputs = _to_sequence(inputs, config, inv=True)
-        sample_output = x_tilde.squeeze(1)
-        if config.dataset_type == "fld2":
-            inputs = data.denormalize({**data[idx[i]]['input'], 'tensor': inputs.cpu()})
-            sample_output = data.denormalize({**data[idx[i]]['input'], 'tensor': sample_output.cpu()})
-            labels = data.denormalize({**data[idx[i]]['input'], 'tensor': labels.cpu()})
-        else:
-            inputs = ((inputs / config.scaler2) + config.scaler3) * scaler1[[idx[i]]][:, None, None]
-            sample_output = ((sample_output  / config.scaler2) + config.scaler3) * scaler1[[idx[i]]][:, None, None]
-            labels = ((labels  / config.scaler2) + config.scaler3) * scaler1[[idx[i]]][:, None, None]
-        if config.image_size != config.orig_image_size and config.revert:
-            if config.pad_input:
-                orig_shape = (1, config.orig_image_size[0], config.orig_image_size[1])
-                inputs = pad_input(inputs, pad, inv=True, orig_shape=orig_shape)
-                sample_output = pad_input(sample_output, pad, inv=True, orig_shape=orig_shape)
-                labels = pad_input(labels, pad, inv=True, orig_shape=orig_shape)
+        for j, ik, ts in zip(range(config.input_dim), input_key, training_stage):
+            if config.dataset_type == "fld2":
+                data.transform.transforms = [t for t in data.transform.transforms if 
+                                            any([isinstance(t, Normalization)])]
+                inputs = torch.zeros((1, config.input_dim, *config.image_size), device=config.device)
+                inputs[:, j] = data[idx[i]][ik]['tensor'].to(config.device)
+                labels = inputs.clone()
             else:
-                inputs = torch.tensor(resize_image2(inputs[0].cpu().numpy(), 
-                                                    config.orig_image_size))
-                sample_output = torch.tensor(resize_image2(sample_output[0].cpu().numpy(), 
-                                                           config.orig_image_size))
-                labels = torch.tensor(resize_image2(labels[0].cpu().numpy(), 
-                                                    config.orig_image_size))
-        
-        X = inputs.squeeze().cpu()
-        y = sample_output.squeeze().cpu()
-        z = labels.squeeze().cpu()
-
-        vlims = {"vqvae-training": [1500, 4500], "vqvae-training-refl": [-1, 1]}
-        vlims_diff = {"vqvae-training": [-500, 500], "vqvae-training-refl": [-0.2, 0.2]}
-        cmaps = {"vqvae-training": "terrain", "vqvae-training-refl": "Greys"}
-        scalers_2 = {'syn1': 10, 'fld1': 10, 'fld2': 1e-2}
-        scalers = {"vqvae-training": 1, "vqvae-training-refl": scalers_2[config.dataset_type]}
-        
-        f, ax = plt.subplots(1, 4, figsize=(20, 5), sharey=True, sharex=False)
-        im1 = ax[0].imshow(X.detach().T * scalers[config.training_stage], 
-                           aspect=1, 
-                           vmin=vlims[config.training_stage][0], 
-                           vmax=vlims[config.training_stage][1], 
-                           cmap=cmaps[config.training_stage])
-        ax[0].set_title("Input")
-        ax[0].set_xlabel("X")
-        ax[0].set_ylabel("Z")
-        f.colorbar(im1, fraction=0.046, pad=0.04)
-        
-        im2 = ax[1].imshow(y.detach().T * scalers[config.training_stage],
-                           aspect=1, 
-                           vmin=vlims[config.training_stage][0], 
-                           vmax=vlims[config.training_stage][1], 
-                           cmap=cmaps[config.training_stage])
-        error = nn.MSELoss()(y, z)
-        ax[1].set_title("Output (MSE: {:.3})".format(error))
-        ax[1].set_xlabel("X")
-        f.colorbar(im2, fraction=0.046, pad=0.04)
-        
-        im3 = ax[2].imshow(z.detach().T * scalers[config.training_stage],
-                           aspect=1, 
-                           vmin=vlims[config.training_stage][0], 
-                           vmax=vlims[config.training_stage][1], 
-                           cmap=cmaps[config.training_stage])
-        ax[2].set_title("Label")
-        ax[2].set_xlabel("X")
-        f.colorbar(im3, fraction=0.046, pad=0.04)
-        
-        diff = (z - y)
-        im4 = ax[3].imshow(diff.detach().T * scalers[config.training_stage], 
-                           aspect=1, 
-                           vmin=vlims_diff[config.training_stage][0], 
-                           vmax=vlims_diff[config.training_stage][1], 
-                           cmap=cmaps[config.training_stage])
-        ax[3].set_title("(Label - Output)")
-        ax[3].set_xlabel("X")
-        f.colorbar(im4, fraction=0.046, pad=0.04)
-
-        f.savefig(os.path.join(config.parent_dir, "example_prediction_{}_{}.png").format(prefix, i+1))
-        if log:
-            wandb.log({"plot_{}_{}".format(prefix, i+1): f})
+                inputs = data.data['input'][[idx[i]]].to(config.device)
+                labels = data.data['label'][[idx[i]]].to(config.device)
+                inputs = inputs.unsqueeze(1)
             
-        print(latents)
+    #         inputs = _to_sequence(inputs, config)
+            with torch.no_grad():
+                if config.vq_type == "vqvae":
+                    x_tilde, z_e_x, z_q_x = model(inputs)
+                    latents = model.encode(inputs)
+                elif config.vq_type == "vqvae2":
+                    x_tilde, latent_loss = model(inputs)
+                    _, _, _, *latents = model.encode(inputs)
+            
+    #         inputs = _to_sequence(inputs, config, inv=True)
+            sample_output = x_tilde#.squeeze(1)
+            if config.dataset_type == "fld2":
+                inputs = data.denormalize({**data[idx[i]][ik], 'tensor': inputs.cpu()})
+                sample_output = data.denormalize({**data[idx[i]][ik], 'tensor': sample_output.cpu()})
+                labels = data.denormalize({**data[idx[i]][ik], 'tensor': labels.cpu()})
+            else:
+                inputs = ((inputs / config.scaler2) + config.scaler3) * scaler1[[idx[i]]][:, None, None]
+                sample_output = ((sample_output  / config.scaler2) + config.scaler3) * scaler1[[idx[i]]][:, None, None]
+                labels = ((labels  / config.scaler2) + config.scaler3) * scaler1[[idx[i]]][:, None, None]
+            if config.image_size != config.orig_image_size and config.revert:
+                if config.pad_input:
+                    orig_shape = (1, config.orig_image_size[0], config.orig_image_size[1])
+                    inputs = pad_input(inputs, pad, inv=True, orig_shape=orig_shape)
+                    sample_output = pad_input(sample_output, pad, inv=True, orig_shape=orig_shape)
+                    labels = pad_input(labels, pad, inv=True, orig_shape=orig_shape)
+                else:
+                    inputs = torch.tensor(resize_image2(inputs[0].cpu().numpy(), 
+                                                        config.orig_image_size))
+                    sample_output = torch.tensor(resize_image2(sample_output[0].cpu().numpy(), 
+                                                            config.orig_image_size))
+                    labels = torch.tensor(resize_image2(labels[0].cpu().numpy(), 
+                                                        config.orig_image_size))
+            
+            X = inputs[:, j].cpu()
+            y = sample_output[:, j].cpu()
+            z = labels[:, j].cpu()
+
+            vlims = {"vqvae-training": [1500, 4500], "vqvae-training-refl": [-1, 1]}
+            vlims_diff = {"vqvae-training": [-500, 500], "vqvae-training-refl": [-0.2, 0.2]}
+            cmaps = {"vqvae-training": "terrain", "vqvae-training-refl": "Greys"}
+            scalers_2 = {'syn1': 10, 'fld1': 10, 'fld2': 1e-2}
+            scalers = {"vqvae-training": 1, "vqvae-training-refl": scalers_2[config.dataset_type]}
+            
+            f, ax = plt.subplots(1, 4, figsize=(20, 5), sharey=True, sharex=False)
+            im1 = ax[0].imshow(X.detach().T * scalers[ts], 
+                            aspect=1, 
+                            vmin=vlims[ts][0], 
+                            vmax=vlims[ts][1], 
+                            cmap=cmaps[ts])
+            ax[0].set_title("Input")
+            ax[0].set_xlabel("X")
+            ax[0].set_ylabel("Z")
+            f.colorbar(im1, fraction=0.046, pad=0.04)
+            
+            im2 = ax[1].imshow(y.detach().T * scalers[ts],
+                            aspect=1, 
+                            vmin=vlims[ts][0], 
+                            vmax=vlims[ts][1], 
+                            cmap=cmaps[ts])
+            error = nn.MSELoss()(y, z)
+            ax[1].set_title("Output (MSE: {:.3})".format(error))
+            ax[1].set_xlabel("X")
+            f.colorbar(im2, fraction=0.046, pad=0.04)
+            
+            im3 = ax[2].imshow(z.detach().T * scalers[ts],
+                            aspect=1, 
+                            vmin=vlims[ts][0], 
+                            vmax=vlims[ts][1], 
+                            cmap=cmaps[ts])
+            ax[2].set_title("Label")
+            ax[2].set_xlabel("X")
+            f.colorbar(im3, fraction=0.046, pad=0.04)
+            
+            diff = (z - y)
+            im4 = ax[3].imshow(diff.detach().T * scalers[ts], 
+                            aspect=1, 
+                            vmin=vlims_diff[ts][0], 
+                            vmax=vlims_diff[ts][1], 
+                            cmap=cmaps[ts])
+            ax[3].set_title("(Label - Output)")
+            ax[3].set_xlabel("X")
+            f.colorbar(im4, fraction=0.046, pad=0.04)
+
+            f.savefig(os.path.join(config.parent_dir, "example_prediction_{}_{}_{}.png").format(prefix, i+1, j+1))
+            if log:
+                wandb.log({"plot_{}_{}_{}".format(prefix, i+1, j+1): f})
+                
+            print(latents)
 
 def plot_example3(model, data, scaler1, pad, config, idx, scaler=1, log=False, prefix=0):
     device = config.device

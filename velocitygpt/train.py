@@ -71,8 +71,18 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
                 # pull all tensor batches required for training
                 if config.dataset_type == "fld2":
                     batch['input'] = {k: v.to(device) for k, v in batch['input'].items()}
+                    batch['label'] = {k: v.to(device) for k, v in batch['label'].items()}
                     inputs = batch['input']['tensor']
-                    labels = inputs.clone()
+                    labels = batch['label']['tensor']
+                    if config.input_dim == 1:
+                        inputs = inputs.unsqueeze(1)
+                        labels = inputs.clone()
+                    elif config.input_dim == 2:
+                        inputs = torch.stack((inputs, labels), dim=1)
+                        rand_mask = (torch.rand(config.input_dim) > 0.5).float() if config.input_rand_mask else torch.ones(config.input_dim)
+                        rand_mask = rand_mask.reshape(1, -1, 1, 1)
+                        inputs = inputs * rand_mask.to(inputs.device)
+                        labels = inputs.clone()
                 else:
                     inputs = batch['input'].to(config.device)
                     labels = batch['label'].to(config.device)
@@ -80,8 +90,8 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
                 # process
     #             inputs = _to_sequence(inputs, config)
                 if config.vq_type == "vqvae":
-                    x_tilde, z_e_x, z_q_x = model(inputs.unsqueeze(1))
-                    loss = loss_fn(x_tilde, inputs.unsqueeze(1), z_e_x, z_q_x)
+                    x_tilde, z_e_x, z_q_x = model(inputs)
+                    loss = loss_fn(x_tilde, inputs, z_e_x, z_q_x)
                 elif config.vq_type == "vqvae2":
                     x_tilde, latent_loss = model(inputs.unsqueeze(1))
                     loss = loss_fn(x_tilde, inputs.unsqueeze(1), latent_loss)
@@ -101,12 +111,23 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
                 losses_train += loss.item()
                 with torch.no_grad():
     #                 outputs = _to_sequence(x_tilde, config, inv=True)
-                    outputs = x_tilde.squeeze(1)
+                    if config.input_dim == 1:
+                        outputs = x_tilde.squeeze(1)
+                        labels = labels.squeeze(1)
+                    elif config.input_dim == 2:
+                        outputs, outputs2 = x_tilde[:, 0], x_tilde[:, 1]
+                        labels, labels2 = labels[:, 0], labels[:, 1]
                     if config.dataset_type == "fld2":
                         selected_outputs = train_dataloader.dataset.denormalize({**batch['input'], 'tensor': outputs})
                         selected_labels = train_dataloader.dataset.denormalize({**batch['input'], 'tensor': labels})
-                        selected_outputs = selected_outputs.unsqueeze(1)
-                        selected_labels = selected_labels.unsqueeze(1) 
+                        if config.input_dim == 1:
+                            selected_outputs = selected_outputs.unsqueeze(1)
+                            selected_labels = selected_labels.unsqueeze(1)
+                        elif config.input_dim == 2:
+                            selected_outputs2 = train_dataloader.dataset.denormalize({**batch['label'], 'tensor': outputs2})
+                            selected_labels2 = train_dataloader.dataset.denormalize({**batch['label'], 'tensor': labels2})   
+                            selected_outputs = torch.stack((selected_outputs, selected_outputs2), dim=1)
+                            selected_labels = torch.stack((selected_labels, selected_labels2), dim=1)
                     else:     
                         selected_outputs = (outputs.unsqueeze(1) / config.scaler2) + config.scaler3
                         selected_labels = (labels.unsqueeze(1) / config.scaler2) + config.scaler3
@@ -145,8 +166,18 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
                     # pull all tensor batches required for training
                     if config.dataset_type == "fld2":
                         batch['input'] = {k: v.to(device) for k, v in batch['input'].items()}
+                        batch['label'] = {k: v.to(device) for k, v in batch['label'].items()}
                         inputs = batch['input']['tensor']
-                        labels = inputs.clone()
+                        labels = batch['label']['tensor']
+                        if config.input_dim == 1:
+                            inputs = inputs.unsqueeze(1)
+                            labels = inputs.clone()
+                        elif config.input_dim == 2:
+                            inputs = torch.stack((inputs, labels), dim=1)
+                            rand_mask = (torch.rand(config.input_dim) > 0.5).float() if config.input_rand_mask else torch.ones(config.input_dim)
+                            rand_mask = rand_mask.reshape(1, -1, 1, 1)
+                            inputs = inputs * rand_mask.to(inputs.device)
+                            labels = inputs.clone()
                     else:
                         inputs = batch['input'].to(config.device)
                         labels = batch['label'].to(config.device)
@@ -154,23 +185,35 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
                     # process
     #                 inputs = _to_sequence(inputs, config)
                     if config.vq_type == "vqvae":
-                        x_tilde, z_e_x, z_q_x = model(inputs.unsqueeze(1))
-                        loss = loss_fn(x_tilde, inputs.unsqueeze(1), z_e_x, z_q_x)
+                        x_tilde, z_e_x, z_q_x = model(inputs)
+                        loss = loss_fn(x_tilde, inputs, z_e_x, z_q_x)
                     elif config.vq_type == "vqvae2":
-                        x_tilde, latent_loss = model(inputs.unsqueeze(1))
-                        loss = loss_fn(x_tilde, inputs.unsqueeze(1), latent_loss)
+                        x_tilde, latent_loss = model(inputs)
+                        loss = loss_fn(x_tilde, inputs, latent_loss)
                     
                     # calculate metrics
                     losses_valid += loss.item()
     #                 outputs = _to_sequence(x_tilde, config, inv=True)
-                    outputs = x_tilde.squeeze(1)
+                    if config.input_dim == 1:
+                        outputs = x_tilde.squeeze(1)
+                        labels = labels.squeeze(1)
+                    elif config.input_dim == 2:
+                        outputs, outputs2 = x_tilde[:, 0], x_tilde[:, 1]
+                        labels, labels2 = labels[:, 0], labels[:, 1]
                     if config.dataset_type == "fld2":
                         selected_outputs = test_dataloader.dataset.denormalize({**batch['input'], 'tensor': outputs})
                         selected_labels = test_dataloader.dataset.denormalize({**batch['input'], 'tensor': labels})
-                        selected_outputs = selected_outputs.unsqueeze(1)
-                        selected_labels = selected_labels.unsqueeze(1)      
-                    selected_outputs = (outputs.unsqueeze(1) / config.scaler2) + config.scaler3
-                    selected_labels = (labels.unsqueeze(1) / config.scaler2) + config.scaler3
+                        if config.input_dim == 1:
+                            selected_outputs = selected_outputs.unsqueeze(1)
+                            selected_labels = selected_labels.unsqueeze(1)
+                        elif config.input_dim == 2:
+                            selected_outputs2 = test_dataloader.dataset.denormalize({**batch['label'], 'tensor': outputs2})
+                            selected_labels2 = test_dataloader.dataset.denormalize({**batch['label'], 'tensor': labels2})   
+                            selected_outputs = torch.stack((selected_outputs, selected_outputs2), dim=1)
+                            selected_labels = torch.stack((selected_labels, selected_labels2), dim=1)
+                    else:
+                        selected_outputs = (outputs.unsqueeze(1) / config.scaler2) + config.scaler3
+                        selected_labels = (labels.unsqueeze(1) / config.scaler2) + config.scaler3
                     idx_start = i*config.batch_size
                     idx_end = (i+1)*config.batch_size
                     psnr_valid += PSNR((selected_outputs * scaler1[1][idx_start:idx_end][:, None, None, None]).ravel(),

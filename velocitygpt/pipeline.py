@@ -295,13 +295,13 @@ def build_model(config):
             model = VQVAE(config)
             
         print(summary(model.to('cuda:0'), 
-                    input_size=(config.batch_size, 1, config.image_size[0], config.image_size[1]), 
+                    input_size=(config.batch_size, config.input_dim, config.image_size[0], config.image_size[1]), 
                     device=config.device))
     elif "sr" in config.training_stage:
         model = WDSRModel(config)
 
         print(summary(model.to('cuda:0'), 
-                    input_size=(config.batch_size, 1, config.image_size[0], config.image_size[1]), 
+                    input_size=(config.batch_size, config.input_dim, config.image_size[0], config.image_size[1]), 
                     device=config.device))
     else:
         model = GPT2(config)

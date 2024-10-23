@@ -101,6 +101,7 @@ def parse_args():
     parser.add_argument('--use_refl_prob', type=float, default=0.9)
     parser.add_argument('--well_cond_prob', type=float, default=0.9)
     parser.add_argument('--add_dip_to_well', action='store_true')
+    parser.add_argument('--prepend_refl', action='store_true')
 
     # SR model parameters
     parser.add_argument('--scale', type=int, default=4)
@@ -226,7 +227,9 @@ if __name__ == "__main__":
     args.max_position_embeddings = args.max_length + \
                                 (args.latent_dim[1] + 1) * math.ceil(args.well_cond_prob) + \
                                 args.use_dip + \
-                                int(0 if args.vqvae_refl_dir is None else 1)
+                                int(0 if args.vqvae_refl_dir is None else 1) + \
+                                int(args.max_length if args.prepend_refl else 0) 
+                                
     if args.dataset_type != 'fld2':
         args.dataset = args.dataset[0]
         args.dataset_path = args.dataset_path[0]

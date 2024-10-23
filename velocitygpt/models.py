@@ -65,6 +65,7 @@ class GPT2(nn.Module):
         self.refl_vocab_size = config.refl_vocab_size
         self.position_embedding_type = config.position_embedding_type
         self.add_dip_to_well = config.add_dip_to_well
+        self.prepend_refl = config.prepend_refl
     
     def forward(self, x, cls=None, well_pos=None, well_token=None, dip=None, refl=None, dip_well=None):
         length, batch = x.shape
@@ -102,9 +103,12 @@ class GPT2(nn.Module):
             use_refl_embed[refl[0, :] == self.refl_vocab_size] = 0
             use_refl_embed = self.use_refl_embeddings(use_refl_embed).unsqueeze(0)
             refl_embed = self.refl_embeddings(refl)
-            h[1+self.use_dip:] += refl_embed[1:]
-            h = torch.cat([use_refl_embed, h], axis=0)
-        
+            if self.prepend_refl:
+                h = torch.cat([use_refl_embed, refl_embed, h], axis=0)
+            else:
+                h[1+self.use_dip:] += refl_embed[1:]
+                h = torch.cat([use_refl_embed, h], axis=0)
+
         if self.well_cond_prob > 0 and well_pos is not None and well_token is not None:
             well_pos_embed = self.well_position_embeddings(well_pos).unsqueeze(0)
             well_embed = self.token_embeddings(well_token)
@@ -144,6 +148,8 @@ class GPT2(nn.Module):
             
         if self.vqvae_refl_dir is not None and refl is not None:
             logits = logits[1:]
+            if self.prepend_refl:
+                logits = logits[len(refl_embed):]
         
         if self.well_cond_prob > 0 and well_pos is not None and well_token is not None:
             logits = logits[len(well_embed)+1:]

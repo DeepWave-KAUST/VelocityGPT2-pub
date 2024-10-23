@@ -42,7 +42,10 @@ def sample(model, context, length, config, cls=None, well_pos=None, well_token=N
             else:
                 d = None
             if refl is not None:
-                r = refl[:-(length-l-1)] if l < (length - 1) else refl
+                if config.prepend_refl:
+                    r = refl
+                else:
+                    r = refl[:-(length-l-1)] if l < (length - 1) else refl
             else:
                 r = None
             if not config.classify:

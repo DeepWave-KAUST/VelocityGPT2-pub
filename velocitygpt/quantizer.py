@@ -292,7 +292,7 @@ class VectorQuantizedVAE(nn.Module):
 
         return torch.randn_like(x) * noise_factor + x * (1 - noise_factor)
 
-    def forward(self, x):
+    def forward(self, x, return_latents=False):
         if self.add_input_latent_noise:
             x = self.add_noise(x, self.input_noise_factor)
         z_e_x = self.encoder(x)
@@ -301,7 +301,11 @@ class VectorQuantizedVAE(nn.Module):
             z_q_x_st = self.add_noise(z_q_x_st, self.latent_noise_factor)
             z_q_x_st = torch.clamp(z_q_x_st, -1, 1)
         x_tilde = self.decoder(z_q_x_st)
-        return x_tilde, z_e_x, z_q_x
+        if return_latents:
+            latents = self.codebook(z_e_x)
+            return x_tilde, z_e_x, z_q_x, latents
+        else:
+            return x_tilde, z_e_x, z_q_x
 
 class VQVAE(nn.Module):
     def __init__(self, config):

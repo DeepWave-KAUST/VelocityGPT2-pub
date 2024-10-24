@@ -44,6 +44,8 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
     avg_valid_psnr = []
     avg_train_ssim = []
     avg_valid_ssim = []
+    avg_train_cu = []
+    avg_valid_cu = []
     time_per_epoch = []
     lr_epoch = []
     if config.patience is not None:
@@ -64,6 +66,7 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
             losses_train = 0
             psnr_train = 0
             ssim_train = 0
+            cu_train = 0
             for i, batch in enumerate(loop_train):
                 # initialize calculated gradients (from prev step)
                 optim.zero_grad()
@@ -90,7 +93,7 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
                 # process
     #             inputs = _to_sequence(inputs, config)
                 if config.vq_type == "vqvae":
-                    x_tilde, z_e_x, z_q_x = model(inputs)
+                    x_tilde, z_e_x, z_q_x, latents = model(inputs, return_latents=True)
                     x_tilde = x_tilde * rand_mask.to(inputs.device) if config.input_dim == 2 else x_tilde
                     loss = loss_fn(x_tilde, inputs, z_e_x, z_q_x)
                 elif config.vq_type == "vqvae2":
@@ -139,6 +142,7 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
                     ssim_train += ssim((selected_outputs * scaler1[0][idx_start:idx_end][:, None, None, None]) + 1, 
                                     (selected_labels * scaler1[0][idx_start:idx_end][:, None, None, None]) + 1, 
                                     data_range=2, size_average=True)
+                    cu_train += len(latents.unique()) / config.K
                 if verbose:
                     loop_train.set_description(f'Epoch {epoch}')
                     loop_train.set_postfix(loss=loss.item())
@@ -162,6 +166,7 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
             losses_valid = 0
             psnr_valid = 0
             ssim_valid = 0
+            cu_valid = 0
             with torch.no_grad():
                 for i, batch in enumerate(loop_valid):
                     # pull all tensor batches required for training
@@ -186,7 +191,7 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
                     # process
     #                 inputs = _to_sequence(inputs, config)
                     if config.vq_type == "vqvae":
-                        x_tilde, z_e_x, z_q_x = model(inputs)
+                        x_tilde, z_e_x, z_q_x, latents = model(inputs, return_latents=True)
                         x_tilde = x_tilde * rand_mask.to(inputs.device) if config.input_dim == 2 else x_tilde
                         loss = loss_fn(x_tilde, inputs, z_e_x, z_q_x)
                     elif config.vq_type == "vqvae2":
@@ -226,6 +231,7 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
                     if verbose:
                         loop_valid.set_description(f'Validation {epoch}')
                         loop_valid.set_postfix(loss=loss.item())
+                    cu_valid += len(latents.unique()) / config.K
                     
 
             avg_train_loss.append(losses_train / len(train_dataloader))
@@ -235,6 +241,8 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
             avg_train_ssim.append(ssim_train / len(train_dataloader))
             avg_valid_ssim.append(ssim_valid / len(test_dataloader))
             time_per_epoch.append(time.time() - epoch_time)
+            avg_train_cu.append(cu_train / len(train_dataloader))
+            avg_valid_cu.append(cu_valid / len(test_dataloader))
             
             loop_epoch.set_description(f'Epoch {epoch}')
             loop_epoch.set_postfix(avg_valid_loss=avg_valid_loss[epoch])
@@ -254,7 +262,9 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
                         "time_per_epoch": time_per_epoch[epoch],
                         "gpu_memory_used": gpu_memory_used, 
                         "epoch": epoch, 
-                        "lr_epoch": lr_epoch[epoch]})
+                        "lr_epoch": lr_epoch[epoch],
+                        "avg_train_cu": avg_train_cu[epoch], 
+                        "avg_valid_cu": avg_valid_cu[epoch]})
             
             if plot:
                 ax.cla()
@@ -277,7 +287,9 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
                                 "avg_train_psnr": avg_train_psnr[epoch-config.patience], 
                                 "avg_valid_psnr": avg_valid_psnr[epoch-config.patience], 
                                 "avg_train_ssim": avg_train_ssim[epoch-config.patience], 
-                                "avg_valid_ssim": avg_valid_ssim[epoch-config.patience]})
+                                "avg_valid_ssim": avg_valid_ssim[epoch-config.patience], 
+                                "avg_train_cu": avg_train_cu[epoch-config.patience], 
+                                "avg_valid_cu": avg_valid_cu[epoch-config.patience]})
                     break
         
         if config.patience is not None:

@@ -21,7 +21,8 @@ class NpyDataset(Dataset):
                  window_w: int = 128,
                  window_h: int = 128,
                  stride_w: int = 30,
-                 stride_h: int = 30
+                 stride_h: int = 30,
+                 mmap_mode = 'r'
                  ):
         """
         Initialize the NpyDataset.
@@ -55,6 +56,7 @@ class NpyDataset(Dataset):
         self.ltype = np.dtype(ltype)
         self.norm = norm
         self.stride = stride
+        self.mmap_mode = mmap_mode
         
         self.dt_t = self._setup_transformations(dt_transformations)
         self.lb_t = self._setup_transformations(lb_transformations)
@@ -122,10 +124,10 @@ class NpyDataset(Dataset):
         window_sizes = []
         
         for path in self.paths:
-            _dt = np.load(path['data'], mmap_mode='r')
+            _dt = np.load(path['data'], mmap_mode=self.mmap_mode)
             
             if 'label' in path:
-                _lb = np.load(path['label'], mmap_mode='r')
+                _lb = np.load(path['label'], mmap_mode=self.mmap_mode)
             else: 
                 _lb = np.zeros_like(_dt)
                 
@@ -171,7 +173,7 @@ class NpyDataset(Dataset):
             data.append(_dt)
             labels.append(_lb)
             orders.append(path['order'])
-            ranges.append((x_st, x_end, y_st, y_end))
+            ranges.append((x_st, x_end, y_st, y_end, z_st, z_end))
             n_x = ((x_end - x_st) + (self.stride - 1))//self.stride
             n_y = ((y_end - y_st) + (self.stride - 1))//self.stride
 
@@ -209,11 +211,11 @@ class NpyDataset(Dataset):
         if dim == 'z': 
             return _dt.shape[_pos]
         if dim == 'x': 
-            x_st, x_end, _, _ = self.ranges[f_idx]
+            x_st, x_end, _, _, _, _ = self.ranges[f_idx]
             n_x = ((x_end - x_st) + (self.stride - 1))//self.stride
             return n_x
         if dim == 'y':
-            _, _, y_st, y_end = self.ranges[f_idx]
+            _, _, y_st, y_end, _, _ = self.ranges[f_idx]
             n_y = ((y_end - y_st) + (self.stride - 1))//self.stride
             return n_y
         

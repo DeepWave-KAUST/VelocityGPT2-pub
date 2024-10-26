@@ -99,6 +99,7 @@ def parse_args():
     parser.add_argument('--flip_train_inv', action='store_true')
     parser.add_argument('--use_dip', action='store_true')
     parser.add_argument('--use_dip_prob', type=float, default=0)
+    parser.add_argument('--glob_pos_mode', type=str, default=None)
     parser.add_argument('--use_refl_prob', type=float, default=0.9)
     parser.add_argument('--well_cond_prob', type=float, default=0.9)
     parser.add_argument('--add_dip_to_well', action='store_true')

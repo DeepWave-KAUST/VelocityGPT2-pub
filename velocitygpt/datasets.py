@@ -6,11 +6,23 @@ from skimage.transform import resize
 import multiprocessing
 import pylops
 from .NpyDataset import NpyDataset
+import os
 
 class ElasticGPTDataset(torch.utils.data.Dataset):
     """PyTorch Dataset wrapper for ElasticGPT with flexible transformations."""
 
     def __init__(self, data=None, transform=None, config=None, train=True):
+        def create_global_position(x, y, z, comp_rate=4, mode='full', savedir='glob_pos.npy'):
+            x, z = x//comp_rate, z//comp_rate
+            if mode == 'full':
+                glob_pos = torch.arange(z * x).reshape(z, x)
+            elif mode == 'depth':
+                glob_pos = torch.arange(z).repeat_interleave(x).reshape(z, x)
+            glob_pos = glob_pos.repeat_interleave(comp_rate, dim=0).repeat_interleave(comp_rate, dim=1)
+            glob_pos = glob_pos.unsqueeze(0).repeat(y, 1, 1).numpy()
+            
+            np.save(savedir, glob_pos)
+
         self.data = data
         self.config = config
         if self.config is not None and self.data is None:
@@ -27,6 +39,26 @@ class ElasticGPTDataset(torch.utils.data.Dataset):
                                    stride_h=config.stride[1],
                                    mode='windowed', 
                                    line_mode='xline')
+            if config.use_dip:
+                x_glob_pos = self.data.ranges[0][1] - self.data.ranges[0][0]
+                y_glob_pos = self.data.ranges[0][3] - self.data.ranges[0][2]
+                z_glob_pos = self.data.ranges[0][5] - self.data.ranges[0][4]
+                create_global_position(x_glob_pos, y_glob_pos, z_glob_pos, 
+                                       comp_rate=config.image_size[1]//config.latent_dim[1], 
+                                       mode=config.glob_pos_mode, 
+                                       savedir=os.path.join(config.parent_dir, 'glob_pos.npy'))
+                self.glob_pos = NpyDataset(paths=[{'data': os.path.join(config.parent_dir, 'glob_pos.npy'), 'order': ('y', 'z', 'x')}],
+                                            norm=0,
+                                            window_w=config.image_size[0],
+                                            window_h=config.image_size[1], 
+                                            stride_w=config.stride[0], 
+                                            stride_h=config.stride[1],
+                                            mode='windowed', 
+                                            line_mode='xline', 
+                                            mmap_mode=None)
+            else:
+                self.glob_pos = None
+
         self.transform = transform  # Accept a transform or None
 
     def __getitem__(self, idx):
@@ -36,6 +68,10 @@ class ElasticGPTDataset(torch.utils.data.Dataset):
                 sample['input'], sample['label'] = self.data[idx]
                 sample['input'] = torch.tensor(sample['input'].T).float()
                 sample['label'] = torch.tensor(sample['label'].T).float()
+                if self.glob_pos is not None:
+                    sample['dip_seq'] = torch.tensor(self.glob_pos[idx][0]).long()
+                    h, w =  self.config.image_size[1]//self.config.latent_dim[1], self.config.image_size[0]//self.config.latent_dim[0]
+                    sample['dip_seq'] = sample['dip_seq'][::h, ::w].flatten()
             else:
                 sample = {key: val[idx].clone().detach() for key, val in self.data.items()}
 

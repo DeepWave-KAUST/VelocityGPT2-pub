@@ -361,7 +361,11 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                     if config.vqvae_refl_dir is not None:
                         refl = batch['label']['tensor'].to(device)
                     cls = None
-                    dips = None
+                    if config.use_dip:
+                        dips = batch['dip_seq'].to(config.device)
+                        dips = dips.to(config.device)
+                    else:
+                        dips = None
                 else:
                     inputs = batch['input'].to(config.device)
                     labels = batch['label'].to(config.device)
@@ -523,7 +527,11 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                         if config.vqvae_refl_dir is not None:
                             refl = batch['label']['tensor'].to(device)
                         cls = None
-                        dips = None
+                        if config.use_dip:
+                            dips = batch['dip_seq'].to(config.device)
+                            dips = dips.to(config.device)
+                        else:
+                            dips = None
                     else:
                         inputs = batch['input'].to(config.device)
                         labels = batch['label'].to(config.device) 

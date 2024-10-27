@@ -270,13 +270,26 @@ class VectorQuantizedVAE(nn.Module):
 
         self.codebook = VQEmbedding(K, intermediate_dim)
 
-        self.codebook = VectorQuantize(
-                            dim=intermediate_dim,
-                            codebook_size=config.K,     # codebook size
-                            decay=0.8,             # the exponential moving average decay, lower means the dictionary will change faster
-                            commitment_weight=config.beta,
-                            accept_image_fmap=True   # the weight on the commitment loss
-                        )
+        if config.quantizer == "vq":
+            self.codebook = VectorQuantize(
+                                dim=intermediate_dim,
+                                codebook_size=config.K,     # codebook size
+                                decay=0.8,             # the exponential moving average decay, lower means the dictionary will change faster
+                                commitment_weight=config.beta,
+                                accept_image_fmap=True   # the weight on the commitment loss
+                            )
+        elif config.quantizer == "lfq":
+            self.codebook = LFQ(
+                                codebook_size=config.K,      # codebook size, must be a power of 2
+                                dim=intermediate_dim,                   # this is the input feature dimension, defaults to log2(codebook_size) if not defined
+                                entropy_loss_weight=0.1,  # how much weight to place on entropy loss
+                                diversity_gamma=1,       # within entropy loss, how much weight to give to diversity of codes, taken from https://arxiv.org/abs/1911.05894
+                                commitment_loss_weight=config.beta,
+                                soft_clamp_input_value=None,
+                                spherical=False
+                            )
+        else:
+            raise NotImplementedError
 
         self.apply(weights_init)
         

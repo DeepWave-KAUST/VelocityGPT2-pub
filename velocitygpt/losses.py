@@ -159,18 +159,18 @@ class VectorQuantizedVAELoss(nn.Module):
             
         self.use_focal_loss = config.use_focal_loss
         
-    def forward(self, x_tilde, images, z_e_x, z_q_x):
+    def forward(self, x_tilde, images, aux_loss):
         # Reconstruction loss
         loss_recons = self.recon_loss_fn(x_tilde, images)
         if self.use_focal_loss:
             loss_focal = self.focal_loss_fn(x_tilde, images)
             loss_recons += loss_focal
         # Vector quantization objective
-        loss_vq = F.mse_loss(z_q_x, z_e_x.detach())
+        # loss_vq = F.mse_loss(z_q_x, z_e_x.detach())
         # Commitment objective
-        loss_commit = F.mse_loss(z_e_x, z_q_x.detach())
+        # loss_commit = F.mse_loss(z_e_x, z_q_x.detach())
 
-        loss = loss_recons + loss_vq + self.beta * loss_commit
+        loss = loss_recons + aux_loss
         
         return loss
     
@@ -191,9 +191,9 @@ class VQVAELoss(nn.Module):
         # Reconstruction loss
         loss_recons = self.recon_loss_fn(x_tilde, images)
         
-        latent_loss = latent_loss.mean()
+        # latent_loss = latent_loss.mean()
 
-        loss = loss_recons + self.beta * latent_loss
+        loss = loss_recons + latent_loss
         
         return loss
     

@@ -6,6 +6,7 @@ from torch import Tensor, int32
 from torch.cuda.amp import autocast
 from einops import rearrange, pack, unpack
 import random
+from vector_quantize_pytorch import VectorQuantize, LFQ
 
 from .modules import *
 
@@ -269,6 +270,14 @@ class VectorQuantizedVAE(nn.Module):
 
         self.codebook = VQEmbedding(K, intermediate_dim)
 
+        self.codebook = VectorQuantize(
+                            dim=intermediate_dim,
+                            codebook_size=config.K,     # codebook size
+                            decay=0.8,             # the exponential moving average decay, lower means the dictionary will change faster
+                            commitment_weight=config.beta,
+                            accept_image_fmap=True   # the weight on the commitment loss
+                        )
+
         self.apply(weights_init)
         
         self.add_input_latent_noise = config.add_input_latent_noise
@@ -277,11 +286,11 @@ class VectorQuantizedVAE(nn.Module):
 
     def encode(self, x):
         z_e_x = self.encoder(x)
-        latents = self.codebook(z_e_x)
+        _, latents, _ = self.codebook(z_e_x)
         return latents
 
     def decode(self, latents):
-        z_q_x = self.codebook.embedding(latents).permute(0, 3, 1, 2)  # (B, D, H, W)
+        z_q_x = self.codebook.get_codes_from_indices(latents).permute(0, 3, 1, 2)  # (B, D, H, W)
         x_tilde = self.decoder(z_q_x)
         return x_tilde
     
@@ -296,16 +305,15 @@ class VectorQuantizedVAE(nn.Module):
         if self.add_input_latent_noise:
             x = self.add_noise(x, self.input_noise_factor)
         z_e_x = self.encoder(x)
-        z_q_x_st, z_q_x = self.codebook.straight_through(z_e_x)
+        z_q_x, latents, aux_loss = self.codebook(z_e_x)
         if self.add_input_latent_noise:
-            z_q_x_st = self.add_noise(z_q_x_st, self.latent_noise_factor)
-            z_q_x_st = torch.clamp(z_q_x_st, -1, 1)
-        x_tilde = self.decoder(z_q_x_st)
+            z_q_x = self.add_noise(z_q_x, self.latent_noise_factor)
+            z_q_x = torch.clamp(z_q_x, -1, 1)
+        x_tilde = self.decoder(z_q_x)
         if return_latents:
-            latents = self.codebook(z_e_x)
-            return x_tilde, z_e_x, z_q_x, latents
+            return x_tilde, z_e_x, aux_loss, latents
         else:
-            return x_tilde, z_e_x, z_q_x
+            return x_tilde, z_e_x, aux_loss
 
 class VQVAE(nn.Module):
     def __init__(self, config):

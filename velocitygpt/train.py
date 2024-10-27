@@ -93,9 +93,9 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
                 # process
     #             inputs = _to_sequence(inputs, config)
                 if config.vq_type == "vqvae":
-                    x_tilde, z_e_x, z_q_x, latents = model(inputs, return_latents=True)
+                    x_tilde, z_e_x, aux_loss, latents = model(inputs, return_latents=True)
                     x_tilde = x_tilde * rand_mask.to(inputs.device) if config.input_dim == 2 else x_tilde
-                    loss = loss_fn(x_tilde, inputs, z_e_x, z_q_x)
+                    loss = loss_fn(x_tilde, inputs, aux_loss)
                 elif config.vq_type == "vqvae2":
                     x_tilde, latent_loss = model(inputs.unsqueeze(1))
                     loss = loss_fn(x_tilde, inputs.unsqueeze(1), latent_loss)
@@ -191,9 +191,9 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
                     # process
     #                 inputs = _to_sequence(inputs, config)
                     if config.vq_type == "vqvae":
-                        x_tilde, z_e_x, z_q_x, latents = model(inputs, return_latents=True)
+                        x_tilde, z_e_x, aux_loss, latents = model(inputs, return_latents=True)
                         x_tilde = x_tilde * rand_mask.to(inputs.device) if config.input_dim == 2 else x_tilde
-                        loss = loss_fn(x_tilde, inputs, z_e_x, z_q_x)
+                        loss = loss_fn(x_tilde, inputs, aux_loss)
                     elif config.vq_type == "vqvae2":
                         x_tilde, latent_loss = model(inputs)
                         loss = loss_fn(x_tilde, inputs, latent_loss)

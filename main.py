@@ -62,6 +62,7 @@ def parse_args():
     # VQVAE Model parameters
     parser.add_argument('--vq_type', type=str, default='vqvae')
     parser.add_argument('--quantizer', type=str, default='vq')
+    parser.add_argument('--quantizer_entropy_weight', type=float, default=0.1)
     parser.add_argument('--n_layer', type=int, default=2)
     parser.add_argument('--dim', type=int, default=128)
     parser.add_argument('--input_dim', type=int, default=1)

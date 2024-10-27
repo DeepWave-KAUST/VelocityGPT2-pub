@@ -6,7 +6,7 @@ from torch import Tensor, int32
 from torch.cuda.amp import autocast
 from einops import rearrange, pack, unpack
 import random
-from vector_quantize_pytorch import VectorQuantize, LFQ
+from vector_quantize_pytorch import VectorQuantize, LFQ, FSQ
 
 from .modules import *
 
@@ -220,6 +220,7 @@ class VectorQuantizedVAE(nn.Module):
         dim = config.dim
         K = config.K
         intermediate_dim = config.intermediate_dim
+        self.quantizer = config.quantizer
         super().__init__()
         if config.n_layer == 2:
             self.encoder = nn.Sequential(
@@ -288,6 +289,9 @@ class VectorQuantizedVAE(nn.Module):
                                 soft_clamp_input_value=None,
                                 spherical=False
                             )
+        elif config.quantizer == "fsq":
+            self.codebook = FSQ(levels=config.quantizer_levels,
+                                dim=intermediate_dim)
         else:
             raise NotImplementedError
 
@@ -299,7 +303,10 @@ class VectorQuantizedVAE(nn.Module):
 
     def encode(self, x):
         z_e_x = self.encoder(x)
-        _, latents, _ = self.codebook(z_e_x)
+        if self.quantizer == 'fsq':
+            _, latents = self.codebook(z_e_x)
+        else:
+            _, latents, _ = self.codebook(z_e_x)            
         return latents
 
     def decode(self, latents):
@@ -318,7 +325,11 @@ class VectorQuantizedVAE(nn.Module):
         if self.add_input_latent_noise:
             x = self.add_noise(x, self.input_noise_factor)
         z_e_x = self.encoder(x)
-        z_q_x, latents, aux_loss = self.codebook(z_e_x)
+        if self.quantizer == 'fsq':
+            z_q_x, latents = self.codebook(z_e_x)
+            aux_loss = 0
+        else:
+            z_q_x, latents, aux_loss = self.codebook(z_e_x)
         if self.add_input_latent_noise:
             z_q_x = self.add_noise(z_q_x, self.latent_noise_factor)
             z_q_x = torch.clamp(z_q_x, -1, 1)

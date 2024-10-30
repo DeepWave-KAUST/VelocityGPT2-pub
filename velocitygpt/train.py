@@ -430,7 +430,7 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                 if not config.classify:
                     outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well)
                     loss = loss_fn(outputs.view(-1, outputs.size(-1)), 
-                                latents.reshape(-1))
+                                latents.reshape(-1).long())
                     if config.flip_train:
                         outputs2 = model(latents2, cls, well_pos, latents_well, dips, latents_refl, dip_well)
                         if config.flip_train_inv:
@@ -595,7 +595,7 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                     if not config.classify:
                         outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well)
                         loss = loss_fn(outputs.view(-1, outputs.size(-1)), 
-                                    latents.reshape(-1))
+                                    latents.reshape(-1).long())
                         if config.flip_train:
                             outputs2 = model(latents2, cls, well_pos, latents_well, dips, latents_refl, dip_well)
                             if config.flip_train_inv:

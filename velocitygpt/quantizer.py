@@ -310,7 +310,10 @@ class VectorQuantizedVAE(nn.Module):
         return latents
 
     def decode(self, latents):
-        z_q_x = self.codebook.get_codes_from_indices(latents).permute(0, 3, 1, 2)  # (B, D, H, W)
+        if self.quantizer == 'fsq':
+            z_q_x = self.codebook.indices_to_codes(latents)
+        else:
+            z_q_x = self.codebook.get_codes_from_indices(latents).permute(0, 3, 1, 2)  # (B, D, H, W)
         x_tilde = self.decoder(z_q_x)
         return x_tilde
     

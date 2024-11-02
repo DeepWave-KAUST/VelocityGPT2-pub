@@ -79,6 +79,7 @@ def parse_args():
     parser.add_argument('--vocab_size', type=int, default=128)
     parser.add_argument('--refl_vocab_size', type=int, default=128)
     parser.add_argument('--type_vocab_size', type=int, default=2)
+    parser.add_argument('--attn_type', type=str, default='default')
     parser.add_argument('--hidden_size', type=int, default=128)
     parser.add_argument('--intermediate_size', type=int, default=1024)
     parser.add_argument('--num_hidden_ffn', type=int, default=4)

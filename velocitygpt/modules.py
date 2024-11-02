@@ -4,7 +4,9 @@ import torch.nn.functional as F
 import math
 import distributed as dist_fn 
 from torch.autograd import Function
-
+from fast_transformers.attention import AttentionLayer, CausalLinearAttention
+from fast_transformers.masking import TriangularCausalMask, LengthMask
+from linear_attention_transformer.linear_attention_transformer import SelfAttention
 
 class Quantize(nn.Module):
     def __init__(self, dim, n_embed, decay=0.99, eps=1e-5):
@@ -249,12 +251,21 @@ class Block(nn.Module):
         super(Block, self).__init__()
         self.ln_1 = nn.LayerNorm(embed_dim)
         self.ln_2 = nn.LayerNorm(embed_dim)
-        self.attn = nn.MultiheadAttention(embed_dim, num_heads)
+        if config.attn_type == "default":
+            self.attn = nn.MultiheadAttention(embed_dim, num_heads)
+        elif config.attn_type == "linear":
+            self.attn = AttentionLayer(CausalLinearAttention(embed_dim), embed_dim, num_heads)
+        elif config.attn_type == "linear2":
+            self.attn = SelfAttention(embed_dim, num_heads, causal=True)
+        else:
+            raise NotImplementedError
         self.mlp = nn.Sequential(
             nn.Linear(embed_dim, embed_dim * 4),
             nn.GELU(),
             nn.Linear(embed_dim * 4, embed_dim),
         )
+
+        self.attn_type = config.attn_type
         
         def get_slopes(n):
             def get_slopes_power_of_2(n):
@@ -280,10 +291,13 @@ class Block(nn.Module):
         self.num_heads = num_heads
 
     def forward(self, x):
-        attn_mask = torch.full(
-            (len(x), len(x)), -float("Inf"), device=x.device, dtype=x.dtype
-        )
-        attn_mask = torch.triu(attn_mask, diagonal=1)
+        if self.attn_type == "default":
+            attn_mask = torch.full(
+                (len(x), len(x)), -float("Inf"), device=x.device, dtype=x.dtype
+            )
+            attn_mask = torch.triu(attn_mask, diagonal=1)
+        elif self.attn_type == "linear":
+            attn_mask = TriangularCausalMask(len(x), device=x.device)
         
         if self.position_embedding_type == "alibi":
             maxpos = len(x)
@@ -293,7 +307,18 @@ class Block(nn.Module):
             attn_mask += alibi.repeat(x.shape[1], attn_mask.shape[1], 1)#.to(x.device)
 
         x = self.ln_1(x)
-        a, _ = self.attn(x, x, x, attn_mask=attn_mask, need_weights=False)
+        if self.attn_type == "default":
+            a, _ = self.attn(x, x, x, attn_mask=attn_mask, need_weights=False)
+        elif self.attn_type == "linear":
+            x = x.transpose(0, 1)
+            a = self.attn(x, x, x, 
+                          attn_mask=attn_mask, 
+                          query_lengths=LengthMask(x.new_full((x.shape[0],), x.shape[1], dtype=torch.int64)), 
+                          key_lengths=LengthMask(x.new_full((x.shape[0],), x.shape[1], dtype=torch.int64)))
+            a = a.transpose(0, 1)
+            x = x.transpose(0, 1)
+        elif self.attn_type == "linear2":
+            a = self.attn(x)
         x = x + a
         m = self.mlp(self.ln_2(x))
         x = x + m

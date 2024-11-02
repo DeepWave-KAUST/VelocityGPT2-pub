@@ -22,7 +22,7 @@ class GPT2(nn.Module):
         self.token_embeddings = nn.Embedding(config.vocab_size+math.ceil(config.well_cond_prob), 
                                              config.hidden_size//config.n_concat_token)
         
-        if config.position_embedding_type != "alibi":
+        if config.position_embedding_type not in ["alibi", "none"]:
             if config.add_pos_first:
                 self.position_embeddings = nn.Embedding(config.max_position_embeddings, 
                                                         config.hidden_size//config.n_concat_token)
@@ -72,7 +72,7 @@ class GPT2(nn.Module):
         
         h = self.token_embeddings(x)
         
-        if self.add_pos_first and self.position_embedding_type != "alibi":
+        if self.add_pos_first and self.position_embedding_type not in ["alibi", "none"]:
             positions = torch.arange(length, device=x.device).unsqueeze(-1)
             h = h + self.position_embeddings(positions).expand_as(h)
         
@@ -117,7 +117,7 @@ class GPT2(nn.Module):
                 well_embed += dip_well_embed
             h = torch.cat([well_pos_embed, well_embed, h], axis=0)
             
-        if not self.add_pos_first and self.position_embedding_type != "alibi":
+        if not self.add_pos_first and self.position_embedding_type not in ["alibi", "none"]:
             # add positional embeddings
             if self.well_cond_prob > 0 or self.use_dip or self.vqvae_refl_dir is not None:
                 positions = torch.arange(len(h)//self.n_concat_token, device=x.device).unsqueeze(-1)
@@ -125,7 +125,7 @@ class GPT2(nn.Module):
                 positions = torch.arange(length//self.n_concat_token, device=x.device).unsqueeze(-1)
             h = h + self.position_embeddings(positions).expand_as(h)
             
-        if self.double_pos and not self.position_embedding_type != "alibi":
+        if self.double_pos and not self.position_embedding_type not in ["alibi", "none"]:
             positions = torch.arange(length//self.n_concat_token, device=x.device).unsqueeze(-1)
             h = h + self.position_embeddings2(positions).expand_as(h)
 

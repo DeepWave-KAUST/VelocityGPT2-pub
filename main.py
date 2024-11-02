@@ -93,6 +93,7 @@ def parse_args():
     parser.add_argument('--cls_token', action='store_true')
     parser.add_argument('--max_position_embeddings', type=int, default=274)
     parser.add_argument('--position_embedding_type', type=str, default='learnable')
+    parser.add_argument('--fixed_slopes', action='store_true')
     parser.add_argument('--embedding_type', type=str, default='none')
     parser.add_argument('--n_concat_token', type=int, default=1)
     parser.add_argument('--double_pos', action='store_true')

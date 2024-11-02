@@ -318,7 +318,8 @@ class Block(nn.Module):
             a = a.transpose(0, 1)
             x = x.transpose(0, 1)
         elif self.attn_type == "linear2":
-            a = self.attn(x)
+            a = self.attn(x.transpose(0, 1))
+            a = a.transpose(0, 1)
         x = x + a
         m = self.mlp(self.ln_2(x))
         x = x + m

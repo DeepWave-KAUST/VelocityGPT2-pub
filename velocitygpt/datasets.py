@@ -143,6 +143,14 @@ class Normalization:
                     td['std'] = std_val
                     td['tensor'] = (td['tensor'] - td['mean']) / (td['std'] + 1e-8)  # Add epsilon to avoid division by zero
         return tensor1, tensor2  
+    
+class Flip:
+    def __call__(self, tensor1, tensor2):
+        if torch.rand(1).item() < 0.5:
+            return tensor1, tensor2  
+        else:
+            tensor1['tensor'], tensor2['tensor'] = torch.flip(tensor1['tensor'], dims=(0,)), torch.flip(tensor2['tensor'], dims=(0,))
+            return tensor1, tensor2
 
 class DualTransform:
     def __init__(self, transforms):
@@ -165,6 +173,9 @@ def create_transforms(args):
     if sum(args.transform_gaussian_sigma) > 0:
         transform_list.append(get_gaussian_blur_transform(kernel_size=args.transform_gaussian_kernel,
                                                           sigma=args.transform_gaussian_sigma))
+        
+    if args.aug_flip:
+        transform_list.append(Flip())
 
     if args.dataset_type == "fld2":
         transform_list.append(Normalization(args))

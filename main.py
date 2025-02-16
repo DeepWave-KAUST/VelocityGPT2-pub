@@ -57,7 +57,7 @@ def parse_args():
     parser.add_argument('--nt0', type=int, default=64)
     parser.add_argument('--ntwav', type=int, default=63)
     parser.add_argument('--transform_gaussian_kernel', type=int, nargs=2, default=[0, 0])
-    parser.add_argument('--transform_gaussian_sigma', type=float, nargs=2, default=[0, 0])
+    parser.add_argument('--transform_gaussian_sigma', type=float, nargs='+', default=[0, 0])
 
     # VQVAE Model parameters
     parser.add_argument('--vq_type', type=str, default='vqvae')
@@ -109,6 +109,7 @@ def parse_args():
     parser.add_argument('--well_cond_prob', type=float, default=0.9)
     parser.add_argument('--add_dip_to_well', action='store_true')
     parser.add_argument('--prepend_refl', action='store_true')
+    parser.add_argument('--use_init_prob', type=float, default=0)
 
     # SR model parameters
     parser.add_argument('--scale', type=int, default=4)

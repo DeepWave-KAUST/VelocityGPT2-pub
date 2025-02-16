@@ -7,6 +7,8 @@ import multiprocessing
 import pylops
 from .NpyDataset import NpyDataset
 import os
+from torchvision.transforms.functional import gaussian_blur
+from copy import deepcopy
 
 class ElasticGPTDataset(torch.utils.data.Dataset):
     """PyTorch Dataset wrapper for ElasticGPT with flexible transformations."""
@@ -80,7 +82,7 @@ class ElasticGPTDataset(torch.utils.data.Dataset):
 
             # Apply the transform if specified
             if self.transform:
-                sample['input'], sample['label'] = self.transform(sample['input'], sample['label'])
+                sample['input'], sample['label'], sample['label2'] = self.transform(sample['input'], sample['label'])
         else:
             sample = {key: val[idx].clone().detach() for key, val in self.data.items()}
 
@@ -116,54 +118,84 @@ class Normalization:
         self.norm_const = config.norm_const
         self.scaler2 = config.scaler2
         self.scaler3 = config.scaler3
-    def __call__(self, tensor1, tensor2):
+    def __call__(self, tensor1, tensor2, tensor3={}):
         for i, nm in enumerate(self.norm_mode):
             if nm == "max":
-                for j, td in enumerate([tensor1, tensor2]):
-                    if self.norm_level == "trace":
-                        max_val = td['tensor'].max(dim=1, keepdim=True).values
-                    elif self.norm_level == "sample":
-                        max_val = td['tensor'].max().reshape(-1, 1)
-                    else:
-                        max_val = torch.tensor(self.norm_const[j]).reshape(-1, 1)
-                    td['max'] = max_val
-                    td['tensor'] /= (td['max'] + 1e-8)
+                for j, td in enumerate([tensor1, tensor2, tensor3]):
+                    if td:
+                        if self.norm_level == "trace":
+                            max_val = td['tensor'].max(dim=1, keepdim=True).values
+                        elif self.norm_level == "sample":
+                            max_val = td['tensor'].max().reshape(-1, 1)
+                        else:
+                            max_val = torch.tensor(self.norm_const[j]).reshape(-1, 1)
+                        td['max'] = max_val
+                        td['tensor'] /= (td['max'] + 1e-8)
             if nm == "mean_std":
-                for j, td in enumerate([tensor1, tensor2]):
-                    if self.norm_level == "sample":
-                        mean_val = td['tensor'].mean(dim=[0, 1], keepdim=True)
-                        std_val = td['tensor'].std(dim=[0, 1], keepdim=True)
-                    elif self.norm_level == "trace":
-                        mean_val = td['tensor'].mean(dim=[1], keepdim=True)
-                        std_val = td['tensor'].std(dim=[1], keepdim=True)
-                    else:
-                        mean_val = torch.tensor(self.scaler3[j]).reshape(-1, 1)
-                        std_val = torch.tensor(self.scaler2[j]).reshape(-1, 1)
-                    td['mean'] = mean_val
-                    td['std'] = std_val
-                    td['tensor'] = (td['tensor'] - td['mean']) / (td['std'] + 1e-8)  # Add epsilon to avoid division by zero
-        return tensor1, tensor2  
+                for j, td in enumerate([tensor1, tensor2, tensor3]):
+                    if td:
+                        if self.norm_level == "sample":
+                            mean_val = td['tensor'].mean(dim=[0, 1], keepdim=True)
+                            std_val = td['tensor'].std(dim=[0, 1], keepdim=True)
+                        elif self.norm_level == "trace":
+                            mean_val = td['tensor'].mean(dim=[1], keepdim=True)
+                            std_val = td['tensor'].std(dim=[1], keepdim=True)
+                        else:
+                            mean_val = torch.tensor(self.scaler3[j]).reshape(-1, 1)
+                            std_val = torch.tensor(self.scaler2[j]).reshape(-1, 1)
+                        td['mean'] = mean_val
+                        td['std'] = std_val
+                        td['tensor'] = (td['tensor'] - td['mean']) / (td['std'] + 1e-8)  # Add epsilon to avoid division by zero
+        return tensor1, tensor2, tensor3  
     
 class Flip:
-    def __call__(self, tensor1, tensor2):
+    def __call__(self, tensor1, tensor2, tensor3={}):
         if torch.rand(1).item() < 0.5:
-            return tensor1, tensor2  
+            return tensor1, tensor2, tensor3 
         else:
-            tensor1['tensor'], tensor2['tensor'] = torch.flip(tensor1['tensor'], dims=(0,)), torch.flip(tensor2['tensor'], dims=(0,))
-            return tensor1, tensor2
+            for td in [tensor1, tensor2, tensor3]:
+                if td:
+                    td['tensor'] = torch.flip(td['tensor'], dims=(0,))
+            return tensor1, tensor2, tensor3
+        
+def apply_gaussian_filter(tensor, kernel_size, sigma):
+    if sigma > 0:
+        tensor = gaussian_blur(tensor.unsqueeze(0),
+                            kernel_size=[kernel_size, kernel_size],
+                            sigma=[sigma, sigma]).squeeze(0)
+    
+    return tensor
+        
+class GaussianFilter:
+    def __init__(self, config):
+        self.sigma = config.transform_gaussian_sigma
+        self.use_init_prob = config.use_init_prob
+
+    def __call__(self, tensor1, tensor2, tensor3={}, sigma=None):
+        if sigma is None:
+            if len(self.sigma) > 1: # Pick from range
+                sigma = torch.empty(1).uniform_(*self.sigma).item()
+            else: # Binary
+                sigma = self.sigma[0] if torch.rand(1).item() < 0.5 else 0
+        kernel_size = round(4 * sigma) # scipy.ndimage default
+        kernel_size = kernel_size + 1 if kernel_size % 2 == 0 else kernel_size # Make sure odd
+        if self.use_init_prob > 0 and tensor3:
+            tensor3['tensor'] = apply_gaussian_filter(tensor3['tensor'], kernel_size, sigma)
+        else: # Apply to input
+            tensor1['tensor'] = apply_gaussian_filter(tensor1['tensor'], kernel_size, sigma)
+
+        return tensor1, tensor2, tensor3
 
 class DualTransform:
-    def __init__(self, transforms):
+    def __init__(self, transforms, config):
         self.transforms = transforms
+        self.use_init_prob = config.use_init_prob
     
     def __call__(self, tensor1, tensor2):
+        tensor3 = deepcopy(tensor1) if self.use_init_prob > 0 else {}
         for t in self.transforms:
-            tensor1, tensor2 = t(tensor1, tensor2)
-        return tensor1, tensor2
-    
-# Define the Gaussian Blur Transform
-def get_gaussian_blur_transform(kernel_size, sigma):
-    return transforms.GaussianBlur(kernel_size=kernel_size, sigma=sigma)
+            tensor1, tensor2, tensor3 = t(tensor1, tensor2, tensor3)
+        return tensor1, tensor2, tensor3
 
 # Function to create a list of transforms based on arguments
 def create_transforms(args):
@@ -171,8 +203,7 @@ def create_transforms(args):
     
     # Add Gaussian blur if specified
     if sum(args.transform_gaussian_sigma) > 0:
-        transform_list.append(get_gaussian_blur_transform(kernel_size=args.transform_gaussian_kernel,
-                                                          sigma=args.transform_gaussian_sigma))
+        transform_list.append(GaussianFilter(args))
         
     if args.aug_flip:
         transform_list.append(Flip())
@@ -181,7 +212,7 @@ def create_transforms(args):
         transform_list.append(Normalization(args))
     
     if transform_list:
-        return DualTransform(transform_list)
+        return DualTransform(transform_list, args)
     else:
         return None  # No transform if the list is empty
 

@@ -45,6 +45,9 @@ class GPT2(nn.Module):
             self.use_refl_embeddings = nn.Embedding(2, config.hidden_size)
             self.refl_embeddings = nn.Embedding(config.refl_vocab_size+1, 
                                                 config.hidden_size//config.n_concat_token)
+            
+        if config.use_init_prob:
+             self.use_init_embeddings = nn.Embedding(2, config.hidden_size)
 
         self.layers = nn.ModuleList()
         for _ in range(config.num_hidden_layers):
@@ -66,8 +69,10 @@ class GPT2(nn.Module):
         self.position_embedding_type = config.position_embedding_type
         self.add_dip_to_well = config.add_dip_to_well
         self.prepend_refl = config.prepend_refl
+        self.vocab_size = config.vocab_size
+        self.use_init_prob = config.use_init_prob
     
-    def forward(self, x, cls=None, well_pos=None, well_token=None, dip=None, refl=None, dip_well=None):
+    def forward(self, x, cls=None, well_pos=None, well_token=None, dip=None, refl=None, dip_well=None, init=None):
         length, batch = x.shape
         
         h = self.token_embeddings(x)
@@ -116,6 +121,13 @@ class GPT2(nn.Module):
                 dip_well_embed = self.dip_embeddings(dip_well).transpose(0, 1)
                 well_embed += dip_well_embed
             h = torch.cat([well_pos_embed, well_embed, h], axis=0)
+
+        if self.use_init_prob and init is not None:
+            use_init_embed = torch.ones(init.shape[1], device=h.device).long()
+            use_init_embed[init[0, :] == self.vocab_size] = 0
+            use_init_embed = self.use_init_embeddings(use_init_embed).unsqueeze(0)
+            init_embed = self.token_embeddings(init)
+            h = torch.cat([use_init_embed, init_embed, h], axis=0)
             
         if not self.add_pos_first and self.position_embedding_type not in ["alibi", "none"]:
             # add positional embeddings
@@ -153,6 +165,9 @@ class GPT2(nn.Module):
         
         if self.well_cond_prob > 0 and well_pos is not None and well_token is not None:
             logits = logits[len(well_embed)+1:]
+        
+        if self.use_init_prob and init is not None:
+            logits = logits[len(init_embed)+1:]
                 
         if not self.classify:
             # return logits

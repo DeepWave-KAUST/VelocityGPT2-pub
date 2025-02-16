@@ -366,6 +366,10 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                         dips = dips.to(config.device)
                     else:
                         dips = None
+                    if config.use_init_prob:
+                        init = batch['label2']['tensor'].to(device)
+                    else:
+                        init = None
                 else:
                     inputs = batch['input'].to(config.device)
                     labels = batch['label'].to(config.device)
@@ -422,17 +426,23 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                         latents_refl[:, ~with_refl_mask] = config.refl_vocab_size
                     else:
                         latents_refl = None
+
+                    if config.use_init_prob:
+                        latents_init = vqvae_model.encode(init.unsqueeze(1))
+                        latents_init, _ = _to_sequence2(latents_init)
+                    else:
+                        latents_init = None
                     
                 if config.flip_train:
                     latents2, orig_shape = _to_sequence2(torch.flip(latents, dims=(1,)))
                 latents, orig_shape = _to_sequence2(latents)
                 
                 if not config.classify:
-                    outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well)
+                    outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
                     loss = loss_fn(outputs.view(-1, outputs.size(-1)), 
                                 latents.reshape(-1).long())
                     if config.flip_train:
-                        outputs2 = model(latents2, cls, well_pos, latents_well, dips, latents_refl, dip_well)
+                        outputs2 = model(latents2, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
                         if config.flip_train_inv:
                             outputs2 = outputs2.reshape(orig_shape[1], orig_shape[2], *outputs2.shape[1:])
                             outputs2 = torch.flip(outputs2, dims=(1,)).reshape(-1, *outputs2.shape[1:])
@@ -447,7 +457,7 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                     loss_gen = torch.tensor([0])
                     loss_clf = torch.tensor([0])
                 else:
-                    clf_logits, outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well)
+                    clf_logits, outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
                     
                     loss_gen = loss_fn(outputs.view(-1, outputs.size(-1)), 
                                     latents.reshape(-1))
@@ -532,6 +542,10 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                             dips = dips.to(config.device)
                         else:
                             dips = None
+                        if config.use_init_prob:
+                            init = batch['label2']['tensor'].to(device)
+                        else:
+                            init = None
                     else:
                         inputs = batch['input'].to(config.device)
                         labels = batch['label'].to(config.device) 
@@ -588,16 +602,22 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                     else:
                         latents_refl = None
 
+                    if config.use_init_prob:
+                        latents_init = vqvae_model.encode(init.unsqueeze(1))
+                        latents_init, _ = _to_sequence2(latents_init)
+                    else:
+                        latents_init = None
+
                     if config.flip_train:
                         latents2, orig_shape = _to_sequence2(torch.flip(latents, dims=(1,)))
                     latents, orig_shape = _to_sequence2(latents)
 
                     if not config.classify:
-                        outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well)
+                        outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
                         loss = loss_fn(outputs.view(-1, outputs.size(-1)), 
                                     latents.reshape(-1).long())
                         if config.flip_train:
-                            outputs2 = model(latents2, cls, well_pos, latents_well, dips, latents_refl, dip_well)
+                            outputs2 = model(latents2, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
                             if config.flip_train_inv:
                                 outputs2 = outputs2.reshape(orig_shape[1], orig_shape[2], *outputs2.shape[1:])
                                 outputs2 = torch.flip(outputs2, dims=(1,)).reshape(-1, *outputs2.shape[1:])
@@ -612,7 +632,7 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                         loss_gen = torch.tensor([0])
                         loss_clf = torch.tensor([0])
                     else:
-                        clf_logits, outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well)
+                        clf_logits, outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
 
                         loss_gen = loss_fn(outputs.view(-1, outputs.size(-1)), 
                                         latents.reshape(-1))

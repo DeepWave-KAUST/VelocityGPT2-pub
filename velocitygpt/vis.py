@@ -32,7 +32,7 @@ from .utils import *
 from .utils import _to_sequence2
 from .datasets import *
 
-def sample(model, context, length, config, cls=None, well_pos=None, well_token=None, dip=None, refl=None, dip_well=None):
+def sample(model, context, length, config, cls=None, well_pos=None, well_token=None, dip=None, refl=None, dip_well=None, init=None):
     outputs = context.to(config.device) # add batch so shape [seq len, batch]
     pad = torch.zeros(config.n_concat_token, outputs.shape[-1], dtype=torch.long).to(config.device)  # to pad prev output
     with torch.no_grad():
@@ -49,9 +49,9 @@ def sample(model, context, length, config, cls=None, well_pos=None, well_token=N
             else:
                 r = None
             if not config.classify:
-                logits = model(torch.cat((outputs, pad), dim=0), cls, well_pos, well_token, d, r, dip_well)
+                logits = model(torch.cat((outputs, pad), dim=0), cls, well_pos, well_token, d, r, dip_well, init)
             else:
-                clf_logits, logits = model(torch.cat((outputs, pad), dim=0), cls, well_pos, well_token, d, r, dip_well)
+                clf_logits, logits = model(torch.cat((outputs, pad), dim=0), cls, well_pos, well_token, d, r, dip_well, init)
             logits = logits[-config.n_concat_token:, :, :]# / 1
             probs = F.softmax(logits, dim=-1)
             pred = []
@@ -86,11 +86,14 @@ def plot_example(vqvae_model, vqvae_refl_model, model, data, scaler1, pad, confi
     for i in range(len(idx)): 
         if config.dataset_type == "fld2":
             data.transform.transforms = [t for t in data.transform.transforms if 
-                                         any([isinstance(t, Normalization)])]
+                                         any([isinstance(t, Normalization), 
+                                              isinstance(t, GaussianFilter)])]
             inputs = data[idx[i]]['input']['tensor'].unsqueeze(0).to(config.device)
             labels = inputs.clone()
             if config.vqvae_refl_dir is not None:
                 refl = data[idx[i]]['label']['tensor'].unsqueeze(0).to(config.device)
+            if config.use_init_prob:
+                init = data[idx[i]]['label2']['tensor'].unsqueeze(0).to(config.device)
         else:
             inputs = data.data['input'][[idx[i]]].to(config.device)
             labels = data.data['label'][[idx[i]]].to(config.device)
@@ -133,12 +136,17 @@ def plot_example(vqvae_model, vqvae_refl_model, model, data, scaler1, pad, confi
                 latents_refl, orig_shape = _to_sequence2(latents_refl)
             else:
                 latents_refl = None
-
+            if config.use_init_prob:
+                latents_init = vqvae_model.encode(init.unsqueeze(1))
+                latents_init, orig_shape = _to_sequence2(latents_init)
+            else:
+                latents_init = None
+            
         # Get predictions
         latents, orig_shape = _to_sequence2(latents)
         length = config.max_length - latents.shape[0]
         preds, pred_cls = sample(model, latents, length//config.n_concat_token, config, cls[[i]], 
-                                 well_pos_inp, well_token, dip, latents_refl, dip_well)
+                                 well_pos_inp, well_token, dip, latents_refl, dip_well, latents_init)
 
         # # Transform back to image
         orig_shape = (orig_shape[0], orig_shape[1], int(orig_shape[2]+(length/config.latent_dim[0])))

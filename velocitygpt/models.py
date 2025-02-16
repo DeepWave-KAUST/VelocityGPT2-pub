@@ -19,7 +19,7 @@ class GPT2(nn.Module):
         elif self.cls_token:
             self.cls_token_embeddings = nn.Embedding(config.num_classes, config.hidden_size)
 
-        self.token_embeddings = nn.Embedding(config.vocab_size+math.ceil(config.well_cond_prob), 
+        self.token_embeddings = nn.Embedding(config.vocab_size+math.ceil(config.well_cond_prob or config.use_init_prob), 
                                              config.hidden_size//config.n_concat_token)
         
         if config.position_embedding_type not in ["alibi", "none"]:

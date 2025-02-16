@@ -430,6 +430,8 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                     if config.use_init_prob:
                         latents_init = vqvae_model.encode(init.unsqueeze(1))
                         latents_init, _ = _to_sequence2(latents_init)
+                        with_init_mask = (torch.rand(len(inputs)) < config.use_init_prob)
+                        latents_init[:, ~with_init_mask] = config.vocab_size
                     else:
                         latents_init = None
                     
@@ -605,6 +607,8 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                     if config.use_init_prob:
                         latents_init = vqvae_model.encode(init.unsqueeze(1))
                         latents_init, _ = _to_sequence2(latents_init)
+                        with_init_mask = (torch.rand(len(inputs)) < config.use_init_prob)
+                        latents_init[:, ~with_init_mask] = config.vocab_size
                     else:
                         latents_init = None
 

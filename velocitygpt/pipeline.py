@@ -347,6 +347,14 @@ def build_model(config):
             dip_well = torch.zeros(config.batch_size, config.latent_dim[1], dtype=torch.long)
         
         input_data.append(dip_well)
+
+        if config.use_init_prob:
+            init = torch.randint(high=config.vocab_size, size=(config.max_length, config.batch_size))
+        else:
+            # Create a mock tensor for refl with appropriate size
+            init = torch.zeros(config.max_length, config.batch_size, dtype=torch.long)
+        
+        input_data.append(init)
         
         summary(model.to(config.device), 
                 input_data=input_data, 

@@ -8,6 +8,7 @@ from skimage.transform import resize
 import gc
 import subprocess
 import os
+import dill
 
 def setup(config):
     set_seed(config.seed)
@@ -90,7 +91,7 @@ def save_all(model, avg_train_loss, avg_valid_loss, time_per_epoch, config):
     print("Saving to", config.parent_dir)
     if os.path.exists(os.path.join(config.parent_dir, 'model.pt')):
         if input("Path exists. Overwrite? (y/n)") == 'y':
-            torch.save(model, os.path.join(config.parent_dir, 'model.pt'))
+            torch.save(model, os.path.join(config.parent_dir, 'model.pt'), pickle_module=dill)
             avg_train_loss_arr = np.array(avg_train_loss)
             avg_valid_loss_arr = np.array(avg_valid_loss)
             time_arr = np.array(time_per_epoch)
@@ -102,7 +103,7 @@ def save_all(model, avg_train_loss, avg_valid_loss, time_per_epoch, config):
         else:
             print("Saving failed.")
     else:
-        torch.save(model, os.path.join(config.parent_dir, 'model.pt'))
+        torch.save(model, os.path.join(config.parent_dir, 'model.pt'), pickle_module=dill)
         avg_train_loss_arr = np.array(avg_train_loss)
         avg_valid_loss_arr = np.array(avg_valid_loss)
         time_arr = np.array(time_per_epoch)

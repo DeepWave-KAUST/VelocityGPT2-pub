@@ -237,7 +237,7 @@ if __name__ == "__main__":
                                 args.use_dip + \
                                 int(0 if args.vqvae_refl_dir is None else 1) + \
                                 int(args.max_length if args.prepend_refl else 0) + \
-                                (args.max_length + 1) if args.use_init_prob else 0
+                                ((args.max_length + 1) if args.use_init_prob else 0)
                                 
     if args.dataset_type != 'fld2':
         args.dataset = args.dataset[0]

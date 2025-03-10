@@ -84,7 +84,7 @@ def plot_example(vqvae_model, vqvae_refl_model, model, data, scaler1, pad, confi
     model.eval()
 
     for i in range(len(idx)): 
-        if config.dataset_type == "fld2":
+        if config.dataset_type in ["fld2", "syn2"]:
             data.transform.transforms = [t for t in data.transform.transforms if 
                                          any([isinstance(t, Normalization), 
                                               isinstance(t, GaussianFilter)])]
@@ -156,7 +156,7 @@ def plot_example(vqvae_model, vqvae_refl_model, model, data, scaler1, pad, confi
         # #         preds = _to_sequence(preds, inv=True, orig_shape=orig_shape)
         
         input_transformed = labels.clone() 
-        if config.dataset_type == "fld2":
+        if config.dataset_type in ["fld2", "syn2"]:
             input_transformed = data.denormalize({**data[idx[i]]['input'], 'tensor': input_transformed.cpu()})
             sample_output = data.denormalize({**data[idx[i]]['input'], 'tensor': preds.cpu()})
             labels = data.denormalize({**data[idx[i]]['input'], 'tensor': labels.cpu()})
@@ -247,7 +247,7 @@ def plot_example2(model, data, scaler1, pad, config, idx, log=False, prefix=0):
     input_key = ['input', 'label']
     for i in range(len(idx)): 
         for j, ik, ts in zip(range(config.input_dim), input_key, training_stage):
-            if config.dataset_type == "fld2":
+            if config.dataset_type in ["fld2", "syn2"]:
                 data.transform.transforms = [t for t in data.transform.transforms if 
                                             any([isinstance(t, Normalization)])]
                 inputs = torch.zeros((1, config.input_dim, *config.image_size), device=config.device)
@@ -269,7 +269,7 @@ def plot_example2(model, data, scaler1, pad, config, idx, log=False, prefix=0):
             
     #         inputs = _to_sequence(inputs, config, inv=True)
             sample_output = x_tilde#.squeeze(1)
-            if config.dataset_type == "fld2":
+            if config.dataset_type in ["fld2", "syn2"]:
                 inputs = data.denormalize({**data[idx[i]][ik], 'tensor': inputs.cpu()})
                 sample_output = data.denormalize({**data[idx[i]][ik], 'tensor': sample_output.cpu()})
                 labels = data.denormalize({**data[idx[i]][ik], 'tensor': labels.cpu()})
@@ -298,7 +298,7 @@ def plot_example2(model, data, scaler1, pad, config, idx, log=False, prefix=0):
             vlims = {"vqvae-training": [1500, 4500], "vqvae-training-refl": [-1, 1]}
             vlims_diff = {"vqvae-training": [-500, 500], "vqvae-training-refl": [-0.2, 0.2]}
             cmaps = {"vqvae-training": "terrain", "vqvae-training-refl": "Greys"}
-            scalers_2 = {'syn1': 10, 'fld1': 10, 'fld2': 1e-2}
+            scalers_2 = {'syn1': 10, 'fld1': 10, 'fld2': 1e-2, 'syn2': 10}
             scalers = {"vqvae-training": 1, "vqvae-training-refl": scalers_2[config.dataset_type]}
             
             f, ax = plt.subplots(1, 4, figsize=(20, 5), sharey=True, sharex=False)

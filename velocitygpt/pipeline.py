@@ -45,7 +45,7 @@ torch.cuda.empty_cache()
 
 def load_and_prep(config):
     device = config.device
-    if config.dataset_type == "fld2":
+    if config.dataset_type in ["fld2", "syn2"]:
         transform = create_transforms(config)
         train_data = ElasticGPTDataset(config=config, transform=transform, train=True)
         test_data = ElasticGPTDataset(config=config, transform=transform, train=False)

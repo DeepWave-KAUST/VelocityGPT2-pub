@@ -65,7 +65,7 @@ class ElasticGPTDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         if hasattr(self, 'config'):
-            if self.config.dataset_type == "fld2":
+            if self.config.dataset_type in ["fld2", "syn2"]:
                 sample = {}
                 sample['input'], sample['label'] = self.data[idx]
                 sample['input'] = torch.tensor(sample['input'].T).float()
@@ -94,7 +94,7 @@ class ElasticGPTDataset(torch.utils.data.Dataset):
 
     def __len__(self):
         if hasattr(self, 'config'):
-            if self.config.dataset_type == "fld2":
+            if self.config.dataset_type in ["fld2", "syn2"]:
                 return len(self.data)
             else:
                 return len(self.data['input'])
@@ -208,7 +208,7 @@ def create_transforms(args):
     if args.aug_flip:
         transform_list.append(Flip())
 
-    if args.dataset_type == "fld2":
+    if args.dataset_type in ["fld2", "syn2"]:
         transform_list.append(Normalization(args))
     
     if transform_list:

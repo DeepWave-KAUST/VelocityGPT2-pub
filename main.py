@@ -204,7 +204,7 @@ def main(args):
         model, avg_train_loss, avg_valid_loss, time_per_epoch = \
             run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_dataloader, scaler1,
                     args, verbose=False)
-        idx_dict = {'syn1': [0], 'fld1': [0], 'fld2': [100]}
+        idx_dict = {'syn1': [0], 'fld1': [0], 'fld2': [100], 'syn2': [0]}
         plot_example2(model, train_data, scaler1[0], pad, args, idx_dict[args.dataset_type], log=args.wandb_log, 
                       prefix=1)
         plot_example2(model, test_data, scaler1[1], pad, args, idx_dict[args.dataset_type], log=args.wandb_log, 
@@ -239,7 +239,7 @@ if __name__ == "__main__":
                                 int(args.max_length if args.prepend_refl else 0) + \
                                 ((args.max_length + 1) if args.use_init_prob else 0)
                                 
-    if args.dataset_type != 'fld2':
+    if args.dataset_type not in ['fld2', 'syn2']:
         args.dataset = args.dataset[0]
         args.dataset_path = args.dataset_path[0]
         args.scaler2 = args.scaler2[0]

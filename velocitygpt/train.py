@@ -72,7 +72,7 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
                 optim.zero_grad()
 
                 # pull all tensor batches required for training
-                if config.dataset_type == "fld2":
+                if config.dataset_type in ["fld2", "syn2"]:
                     batch['input'] = {k: v.to(device) for k, v in batch['input'].items()}
                     batch['label'] = {k: v.to(device) for k, v in batch['label'].items()}
                     inputs = batch['input']['tensor']
@@ -121,7 +121,7 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
                     elif config.input_dim == 2:
                         outputs, outputs2 = x_tilde[:, 0], x_tilde[:, 1]
                         labels, labels2 = labels[:, 0], labels[:, 1]
-                    if config.dataset_type == "fld2":
+                    if config.dataset_type in ["fld2", "syn2"]:
                         selected_outputs = train_dataloader.dataset.denormalize({**batch['input'], 'tensor': outputs})
                         selected_labels = train_dataloader.dataset.denormalize({**batch['input'], 'tensor': labels})
                         if config.input_dim == 1:
@@ -170,7 +170,7 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
             with torch.no_grad():
                 for i, batch in enumerate(loop_valid):
                     # pull all tensor batches required for training
-                    if config.dataset_type == "fld2":
+                    if config.dataset_type in ["fld2", "syn2"]:
                         batch['input'] = {k: v.to(device) for k, v in batch['input'].items()}
                         batch['label'] = {k: v.to(device) for k, v in batch['label'].items()}
                         inputs = batch['input']['tensor']
@@ -207,7 +207,7 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
                     elif config.input_dim == 2:
                         outputs, outputs2 = x_tilde[:, 0], x_tilde[:, 1]
                         labels, labels2 = labels[:, 0], labels[:, 1]
-                    if config.dataset_type == "fld2":
+                    if config.dataset_type in ["fld2", "syn2"]:
                         selected_outputs = test_dataloader.dataset.denormalize({**batch['input'], 'tensor': outputs})
                         selected_labels = test_dataloader.dataset.denormalize({**batch['input'], 'tensor': labels})
                         if config.input_dim == 1:
@@ -354,7 +354,7 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                 optim.zero_grad()
 
                 # pull all tensor batches required for training
-                if config.dataset_type == "fld2":
+                if config.dataset_type in ["fld2", "syn2"]:
                     batch['input'] = {k: v.to(device) for k, v in batch['input'].items()}
                     inputs = batch['input']['tensor']
                     labels = inputs.clone()
@@ -485,7 +485,7 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                     outputs = _to_sequence2(outputs.argmax(-1), inv=True, orig_shape=orig_shape)
                     outputs = vqvae_model.decode(outputs).squeeze(1)
     #                 outputs = _to_sequence(outputs, inv=True, orig_shape=orig_shape)
-                    if config.dataset_type == "fld2":
+                    if config.dataset_type in ["fld2", "syn2"]:
                         selected_outputs = train_dataloader.dataset.denormalize({**batch['input'], 'tensor': outputs})
                         selected_labels = train_dataloader.dataset.denormalize({**batch['input'], 'tensor': labels})
                         selected_outputs = selected_outputs.unsqueeze(1)
@@ -532,7 +532,7 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
             with torch.no_grad():
                 for i, batch in enumerate(loop_valid):
                     # pull all tensor batches required for training
-                    if config.dataset_type == "fld2":
+                    if config.dataset_type in ["fld2", "syn2"]:
                         batch['input'] = {k: v.to(device) for k, v in batch['input'].items()}
                         inputs = batch['input']['tensor']
                         labels = inputs.clone()
@@ -650,7 +650,7 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                     outputs = _to_sequence2(outputs.argmax(-1), inv=True, orig_shape=orig_shape)
                     outputs = vqvae_model.decode(outputs).squeeze(1)
     #                 outputs = _to_sequence(outputs, inv=True, orig_shape=orig_shape)
-                    if config.dataset_type == "fld2":
+                    if config.dataset_type in ["fld2", "syn2"]:
                         selected_outputs = test_dataloader.dataset.denormalize({**batch['input'], 'tensor': outputs})
                         selected_labels = test_dataloader.dataset.denormalize({**batch['input'], 'tensor': labels})
                         selected_outputs = selected_outputs.unsqueeze(1)

@@ -32,7 +32,8 @@ class ElasticGPTDataset(torch.utils.data.Dataset):
                 range = {'y': (0, config.train_prop*config.prop)} 
             else:
                 range = {'y': (config.train_prop*config.prop, 1*config.prop)}
-            paths = [{'data': dp, 'label': lp, 'order': ('y', 'z', 'x'), 'range': range} for [dp, lp] in config.dataset_path]
+            dataset_path = [x[:2] for x in config.dataset_path]
+            paths = [{'data': dp, 'label': lp, 'order': ('y', 'z', 'x'), 'range': range} for [dp, lp] in dataset_path]
             self.data = NpyDataset(paths=paths,
                                    norm=0,
                                    window_w=config.image_size[0],

@@ -9,6 +9,9 @@ import gc
 import subprocess
 import os
 import dill
+from typing import OrderedDict
+import wandb
+import warnings
 
 def setup(config):
     set_seed(config.seed)
@@ -86,12 +89,15 @@ def count_parameters(model):
     print(f"Total Trainable Params: {total_params}")
     return total_params
 
-def save_all(model, avg_train_loss, avg_valid_loss, time_per_epoch, config):
+def save_all(model, avg_train_loss, avg_valid_loss, time_per_epoch, config, optim, scheduler):
     # Save everything
     print("Saving to", config.parent_dir)
     if os.path.exists(os.path.join(config.parent_dir, 'model.pt')):
         if input("Path exists. Overwrite? (y/n)") == 'y':
             torch.save(model, os.path.join(config.parent_dir, 'model.pt'), pickle_module=dill)
+            torch.save(optim.state_dict(), os.path.join(config.parent_dir, 'optim.pt'))
+            if scheduler is not None:
+                torch.save(scheduler.state_dict(), os.path.join(config.parent_dir, 'scheduler.pt'))
             avg_train_loss_arr = np.array(avg_train_loss)
             avg_valid_loss_arr = np.array(avg_valid_loss)
             time_arr = np.array(time_per_epoch)
@@ -104,6 +110,9 @@ def save_all(model, avg_train_loss, avg_valid_loss, time_per_epoch, config):
             print("Saving failed.")
     else:
         torch.save(model, os.path.join(config.parent_dir, 'model.pt'), pickle_module=dill)
+        torch.save(optim.state_dict(), os.path.join(config.parent_dir, 'optim.pt'))
+        if scheduler is not None:
+            torch.save(scheduler.state_dict(), os.path.join(config.parent_dir, 'scheduler.pt'))
         avg_train_loss_arr = np.array(avg_train_loss)
         avg_valid_loss_arr = np.array(avg_valid_loss)
         time_arr = np.array(time_per_epoch)
@@ -153,3 +162,113 @@ def set_dropout_prob(model, p=0.1):
         component = m[1]
         if isinstance(component, nn.Dropout):
             component.p = p
+
+def load_from_pt_or_checkpoint(path, key):
+    if os.path.exists(os.path.join(path, key+'.pt')):
+        obj = torch.load(os.path.join(path, key+'.pt'), 
+                         pickle_module=dill if key == 'model' else None, 
+                         map_location='cpu')
+        if isinstance(obj, OrderedDict) or isinstance(obj, dict):
+            print(f"Loading {key} from {path}")
+            return obj
+        else:
+            print(f"Loading {key} from {path}")
+            return obj.state_dict()
+    elif any(['checkpoint' in x for x in os.listdir(path)]):
+        obj = torch.load(os.path.join(path, [x for x in os.listdir(path) if 'checkpoint' in x][0]), 
+                         map_location='cpu')
+        print(f"Loading {key} from {path} checkpoint")
+        return obj[key]
+    else:
+        raise FileNotFoundError(f"Checkpoint or {key}.pt not found in {path}")
+    
+def get_previous_epoch_count(config):
+    """Determine the previous epoch count when resuming training.
+    
+    Args:
+        config: Configuration object containing training parameters.
+            Required fields when resuming:
+                - cont_dir: Directory containing previous training data
+                - Optional: wandb_log, wandb_id for Weights & Biases log information
+    
+    Returns:
+        int: Number of epochs already completed (0 if cannot be determined)
+    """
+    if not hasattr(config, 'cont_dir') or config.cont_dir is None:
+        return 0
+    
+    # Method 1: Get epoch from wandb (highest priority)
+    if hasattr(config, 'wandb_log') and config.wandb_log and hasattr(config, 'wandb_id') and config.wandb_id:
+        try:
+            api = wandb.Api()
+            run = api.run(config.wandb_id)
+            if 'epoch' in run.summary:
+                print(f"Resuming from epoch {run.summary['epoch']+1} (from W&B)")
+                return run.summary['epoch'] + 1
+            else:
+                warnings.warn("W&B run found but no epoch information available")
+        except Exception as e:
+            warnings.warn(f"Failed to get epoch from W&B: {e}")
+    
+    # Method 2: Check if train_loss.npy exists and use its length
+    train_loss_path = os.path.join(config.cont_dir, 'train_loss.npy')
+    if os.path.exists(train_loss_path):
+        try:
+            losses = np.load(train_loss_path)
+            prev_epochs = len(losses)
+            print(f"Resuming from epoch {prev_epochs} (from train_loss.npy)")
+            return prev_epochs
+        except Exception as e:
+            warnings.warn(f"Failed to load train_loss.npy: {e}")
+    
+    # Method 3: Try to extract information from optimizer state
+    optim_state_path = os.path.join(config.cont_dir, 'optimizer.pt')
+    if os.path.exists(optim_state_path):
+        try:
+            optim_state = torch.load(optim_state_path)
+            if 'state' in optim_state and len(optim_state['state']) > 0:
+                # Some optimizers store step count in their state
+                first_param_state = next(iter(optim_state['state'].values()))
+                if 'step' in first_param_state:
+                    step_count = first_param_state['step']
+                    
+                    # Need batch size to convert steps to epochs
+                    config_path = os.path.join(config.cont_dir, 'config.pt')
+                    if os.path.exists(config_path):
+                        try:
+                            prev_config = torch.load(config_path, pickle_module=dill)
+                            if hasattr(prev_config, 'batch_size') and hasattr(prev_config, 'train_size'):
+                                steps_per_epoch = prev_config.train_size // prev_config.batch_size
+                                if steps_per_epoch > 0:
+                                    prev_epochs = step_count // steps_per_epoch
+                                    print(f"Resuming from epoch {prev_epochs} (estimated from optimizer state)")
+                                    return prev_epochs
+                        except Exception as e:
+                            warnings.warn(f"Failed to load previous config: {e}")
+        except Exception as e:
+            warnings.warn(f"Failed to analyze optimizer state: {e}")
+    
+    # Method 4: Check for epoch information in checkpoint files
+    checkpoint_files = [f for f in os.listdir(config.cont_dir) if 'checkpoint' in f]
+    if checkpoint_files:
+        try:
+            checkpoint = torch.load(os.path.join(config.cont_dir, checkpoint_files[0]))
+            if 'epoch' in checkpoint:
+                print(f"Resuming from epoch {checkpoint['epoch']+1} (from checkpoint file)")
+                return checkpoint['epoch'] + 1
+        except Exception as e:
+            warnings.warn(f"Failed to get epoch from checkpoint: {e}")
+    
+    # Method 5: If config.pt exists, check if it has an 'epoch' attribute
+    config_path = os.path.join(config.cont_dir, 'config.pt')
+    if os.path.exists(config_path):
+        try:
+            prev_config = torch.load(config_path, pickle_module=dill)
+            if hasattr(prev_config, 'last_epoch'):
+                print(f"Resuming from epoch {prev_config.last_epoch} (from config.pt)")
+                return prev_config.last_epoch
+        except Exception as e:
+            warnings.warn(f"Failed to check config.pt for epoch information: {e}")
+            
+    print("Could not determine previous epoch count. Starting from epoch 0.")
+    return 0

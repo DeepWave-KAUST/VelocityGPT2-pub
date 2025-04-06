@@ -293,6 +293,9 @@ def build_model(config):
             model = VectorQuantizedVAE(config)
         elif config.vq_type == "vqvae2":
             model = VQVAE(config)
+
+        if config.cont_dir is not None:
+            model.load_state_dict(load_from_pt_or_checkpoint(config.cont_dir, "model"))
             
         print(summary(model.to('cuda:0'), 
                     input_size=(config.batch_size, config.input_dim, config.image_size[0], config.image_size[1]), 
@@ -300,11 +303,16 @@ def build_model(config):
     elif "sr" in config.training_stage:
         model = WDSRModel(config)
 
+        if config.cont_dir is not None:
+            model.load_state_dict(load_from_pt_or_checkpoint(config.cont_dir, "model"))
+
         print(summary(model.to('cuda:0'), 
                     input_size=(config.batch_size, config.input_dim, config.image_size[0], config.image_size[1]), 
                     device=config.device))
     else:
         model = GPT2(config)
+        if config.cont_dir is not None:
+            model.load_state_dict(load_from_pt_or_checkpoint(config.cont_dir, "model"))
         print(model)
         
         # Create input tensors with mock values
@@ -370,6 +378,9 @@ def build_optimizer(config, model):
         optim = torch.optim.Adam(model.parameters(), lr=config.lr)
     elif config.optim == "adamw":
         optim = torch.optim.AdamW(model.parameters(), lr=config.lr)
+
+    if config.cont_dir is not None:
+        optim.load_state_dict(load_from_pt_or_checkpoint(config.cont_dir, "optim"))
         
     return optim
 
@@ -384,6 +395,9 @@ def build_warmup_and_scheduler(config, optim):
         scheduler = None
     elif config.scheduler == "cosine":
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=config.epoch, eta_min=config.lr_min)
+
+    if config.cont_dir is not None and config.scheduler != "none":
+        scheduler.load_state_dict(load_from_pt_or_checkpoint(config.cont_dir, "scheduler"))
     
     return warmup, scheduler
 

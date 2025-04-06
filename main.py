@@ -120,6 +120,7 @@ def parse_args():
     # Training parameters
     parser.add_argument('--training_stage', type=str, required=True)
     parser.add_argument('--parent_dir', type=str, default='.', help="Saving directory")
+    parser.add_argument('--cont_dir', type=str, default=None, help="Directory to continue training from")
     parser.add_argument('--lr', type=float, default=0.0025)
     parser.add_argument('--lr_min', type=float, default=0.000001)
     parser.add_argument('--optim', type=str, default='adam')
@@ -175,6 +176,7 @@ def parse_args():
     parser.add_argument('--wandb_job_type', default=None)
     parser.add_argument('--wandb_group', default=None)
     parser.add_argument('--wandb_tags', default=None)
+    parser.add_argument('--wandb_id', type=str, default=None)
     
     return parser.parse_args()
 
@@ -228,7 +230,7 @@ def main(args):
     if args.wandb_log:
         wandb.log({"total_params" : total_params})
         wandb.unwatch()
-    save_all(model, avg_train_loss, avg_valid_loss, time_per_epoch, args)
+    save_all(model, avg_train_loss, avg_valid_loss, time_per_epoch, args, optim, scheduler)
 
 if __name__ == "__main__":
     args = parse_args()
@@ -251,7 +253,9 @@ if __name__ == "__main__":
                    notes=args.wandb_notes, 
                    job_type=args.wandb_job_type, 
                    group=args.wandb_group,
-                   tags=args.wandb_tags)
+                   tags=args.wandb_tags,
+                   id=args.wandb_id,
+                   resume='allow' if args.wandb_id else None)
         args.parent_dir = os.path.join(args.parent_dir, wandb.run.name)
 
         # Get Git commit and branch

@@ -53,7 +53,8 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
         early_stopping = EarlyStopping(patience=config.patience, verbose=False, path=checkpoint)
     
     try:
-        loop_epoch = tqdm(range(epochs))
+        start_epoch = get_previous_epoch_count(config) if hasattr(config, 'cont_dir') and config.cont_dir else 0
+        loop_epoch = tqdm(range(start_epoch, epochs))
         for epoch in loop_epoch:
             epoch_time = time.time()
             lr_epoch.append(get_lr(optim))
@@ -245,7 +246,7 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
             avg_valid_cu.append(cu_valid / len(test_dataloader))
             
             loop_epoch.set_description(f'Epoch {epoch}')
-            loop_epoch.set_postfix(avg_valid_loss=avg_valid_loss[epoch])
+            loop_epoch.set_postfix(avg_valid_loss=avg_valid_loss[-1])
             
             if verbose:
                 print("Epoch time: {:.2f} s".format(time.time() - epoch_time))
@@ -253,18 +254,18 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
                 print("---------------------------------------")
             
             if config.wandb_log:
-                wandb.log({"avg_train_loss": avg_train_loss[epoch], 
-                        "avg_valid_loss": avg_valid_loss[epoch], 
-                        "avg_train_psnr": avg_train_psnr[epoch], 
-                        "avg_valid_psnr": avg_valid_psnr[epoch], 
-                        "avg_train_ssim": avg_train_ssim[epoch], 
-                        "avg_valid_ssim": avg_valid_ssim[epoch], 
-                        "time_per_epoch": time_per_epoch[epoch],
+                wandb.log({"avg_train_loss": avg_train_loss[-1], 
+                        "avg_valid_loss": avg_valid_loss[-1], 
+                        "avg_train_psnr": avg_train_psnr[-1], 
+                        "avg_valid_psnr": avg_valid_psnr[-1], 
+                        "avg_train_ssim": avg_train_ssim[-1], 
+                        "avg_valid_ssim": avg_valid_ssim[-1], 
+                        "time_per_epoch": time_per_epoch[-1],
                         "gpu_memory_used": gpu_memory_used, 
                         "epoch": epoch, 
-                        "lr_epoch": lr_epoch[epoch],
-                        "avg_train_cu": avg_train_cu[epoch], 
-                        "avg_valid_cu": avg_valid_cu[epoch]})
+                        "lr_epoch": lr_epoch[-1],
+                        "avg_train_cu": avg_train_cu[-1], 
+                        "avg_valid_cu": avg_valid_cu[-1]})
             
             if plot:
                 ax.cla()
@@ -331,7 +332,8 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
         early_stopping = EarlyStopping(patience=config.patience, verbose=False, path=checkpoint)
     
     try:
-        loop_epoch = tqdm(range(epochs))
+        start_epoch = get_previous_epoch_count(config) if hasattr(config, 'cont_dir') and config.cont_dir else 0
+        loop_epoch = tqdm(range(start_epoch, epochs))
         for epoch in loop_epoch:
             epoch_time = time.time()
             lr_epoch.append(get_lr(optim))
@@ -688,7 +690,7 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
             avg_valid_clf_acc.append(acc_clf_valid / len(test_dataloader))
             
             loop_epoch.set_description(f'Epoch {epoch}')
-            loop_epoch.set_postfix(avg_valid_loss=avg_valid_loss[epoch])
+            loop_epoch.set_postfix(avg_valid_loss=avg_valid_loss[-1])
             
             if verbose:
                 print("Epoch time: {:.2f} s".format(time.time() - epoch_time))
@@ -696,22 +698,22 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                 print("---------------------------------------")
             
             if config.wandb_log:
-                wandb.log({"avg_train_loss": avg_train_loss[epoch], 
-                        "avg_valid_loss": avg_valid_loss[epoch], 
-                        "avg_train_psnr": avg_train_psnr[epoch], 
-                        "avg_valid_psnr": avg_valid_psnr[epoch], 
-                        "avg_train_ssim": avg_train_ssim[epoch], 
-                        "avg_valid_ssim": avg_valid_ssim[epoch], 
-                        "time_per_epoch": time_per_epoch[epoch],
+                wandb.log({"avg_train_loss": avg_train_loss[-1], 
+                        "avg_valid_loss": avg_valid_loss[-1], 
+                        "avg_train_psnr": avg_train_psnr[-1], 
+                        "avg_valid_psnr": avg_valid_psnr[-1], 
+                        "avg_train_ssim": avg_train_ssim[-1], 
+                        "avg_valid_ssim": avg_valid_ssim[-1], 
+                        "time_per_epoch": time_per_epoch[-1],
                         "gpu_memory_used": gpu_memory_used, 
                         "epoch": epoch, 
-                        "lr_epoch": lr_epoch[epoch], 
-                        "avg_train_clf_loss": avg_train_clf_loss[epoch], 
-                        "avg_valid_clf_loss": avg_valid_clf_loss[epoch], 
-                        "avg_train_gen_loss": avg_train_gen_loss[epoch], 
-                        "avg_valid_gen_loss": avg_valid_gen_loss[epoch], 
-                        "avg_train_clf_acc": avg_train_clf_acc[epoch], 
-                        "avg_valid_clf_acc": avg_valid_clf_acc[epoch]})
+                        "lr_epoch": lr_epoch[-1], 
+                        "avg_train_clf_loss": avg_train_clf_loss[-1], 
+                        "avg_valid_clf_loss": avg_valid_clf_loss[-1], 
+                        "avg_train_gen_loss": avg_train_gen_loss[-1], 
+                        "avg_valid_gen_loss": avg_valid_gen_loss[-1], 
+                        "avg_train_clf_acc": avg_train_clf_acc[-1], 
+                        "avg_valid_clf_acc": avg_valid_clf_acc[-1]})
             
             if plot:
                 ax.cla()
@@ -775,7 +777,8 @@ def run_velup(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_d
         checkpoint = os.path.join(config.parent_dir, str(os.getpid())+"checkpoint.pt")
         early_stopping = EarlyStopping(patience=config.patience, verbose=False, path=checkpoint)
     
-    loop_epoch = tqdm(range(epochs))
+    start_epoch = get_previous_epoch_count(config) if hasattr(config, 'cont_dir') and config.cont_dir else 0
+    loop_epoch = tqdm(range(start_epoch, epochs))
     for epoch in loop_epoch:
         epoch_time = time.time()
         lr_epoch.append(get_lr(optim))
@@ -885,7 +888,7 @@ def run_velup(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_d
         time_per_epoch.append(time.time() - epoch_time)
         
         loop_epoch.set_description(f'Epoch {epoch}')
-        loop_epoch.set_postfix(avg_valid_loss=avg_valid_loss[epoch])
+        loop_epoch.set_postfix(avg_valid_loss=avg_valid_loss[-1])
         
         if verbose:
             print("Epoch time: {:.2f} s".format(time.time() - epoch_time))
@@ -893,16 +896,16 @@ def run_velup(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_d
             print("---------------------------------------")
         
         if config.wandb_log:
-            wandb.log({"avg_train_loss": avg_train_loss[epoch], 
-                    "avg_valid_loss": avg_valid_loss[epoch], 
-                    "avg_train_psnr": avg_train_psnr[epoch], 
-                    "avg_valid_psnr": avg_valid_psnr[epoch], 
-                    "avg_train_ssim": avg_train_ssim[epoch], 
-                    "avg_valid_ssim": avg_valid_ssim[epoch], 
-                    "time_per_epoch": time_per_epoch[epoch],
+            wandb.log({"avg_train_loss": avg_train_loss[-1], 
+                    "avg_valid_loss": avg_valid_loss[-1], 
+                    "avg_train_psnr": avg_train_psnr[-1], 
+                    "avg_valid_psnr": avg_valid_psnr[-1], 
+                    "avg_train_ssim": avg_train_ssim[-1], 
+                    "avg_valid_ssim": avg_valid_ssim[-1], 
+                    "time_per_epoch": time_per_epoch[-1],
                     "gpu_memory_used": gpu_memory_used, 
                     "epoch": epoch, 
-                    "lr_epoch": lr_epoch[epoch]})
+                    "lr_epoch": lr_epoch[-1]})
         
         if plot:
             ax.cla()

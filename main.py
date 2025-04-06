@@ -264,7 +264,7 @@ if __name__ == "__main__":
         wandb.config.update({
             "git_commit": git_commit,
             "git_branch": git_branch
-        })
+        }, allow_val_change=True)
     if args.parent_dir:
         Path(args.parent_dir).mkdir(parents=True, exist_ok=True)
     main(args)

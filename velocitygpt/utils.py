@@ -201,7 +201,7 @@ def get_previous_epoch_count(config):
     if hasattr(config, 'wandb_log') and config.wandb_log and hasattr(config, 'wandb_id') and config.wandb_id:
         try:
             api = wandb.Api()
-            run = api.run(config.wandb_id)
+            run = api.run('caezario/ElasticGPT/'+config.wandb_id)
             if 'epoch' in run.summary:
                 print(f"Resuming from epoch {run.summary['epoch']+1} (from W&B)")
                 return run.summary['epoch'] + 1

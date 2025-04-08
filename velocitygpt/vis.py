@@ -130,14 +130,23 @@ def plot_example(vqvae_model, vqvae_refl_model, model, data, scaler1, pad, confi
         # Transform to discrete
         #         inputs, orig_shape = _to_sequence(inputs)
         with torch.no_grad():
-            latents = vqvae_model.encode(inputs.unsqueeze(1))
+            if config.vqvae_dir == config.vqvae_refl_dir:
+                latents = vqvae_model.encode(torch.stack((inputs, torch.zeros_like(inputs)), dim=1))
+            else:
+                latents = vqvae_model.encode(inputs.unsqueeze(1))
             if config.vqvae_refl_dir is not None:
-                latents_refl = vqvae_refl_model.encode(refl.unsqueeze(1))
+                if config.vqvae_dir == config.vqvae_refl_dir:
+                    latents_refl = vqvae_refl_model.encode(torch.stack((torch.zeros_like(refl), refl), dim=1))
+                else:
+                    latents_refl = vqvae_refl_model.encode(refl.unsqueeze(1))
                 latents_refl, orig_shape = _to_sequence2(latents_refl)
             else:
                 latents_refl = None
             if config.use_init_prob:
-                latents_init = vqvae_model.encode(init.unsqueeze(1))
+                if config.vqvae_dir == config.vqvae_refl_dir:
+                    latents_init = vqvae_model.encode(torch.stack((init, torch.zeros_like(init)), dim=1))
+                else:
+                    latents_init = vqvae_model.encode(init.unsqueeze(1))
                 latents_init, orig_shape = _to_sequence2(latents_init)
             else:
                 latents_init = None

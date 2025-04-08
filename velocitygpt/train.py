@@ -83,8 +83,25 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
                         labels = inputs.clone()
                     elif config.input_dim == 2:
                         inputs = torch.stack((inputs, labels), dim=1)
-                        rand_mask = (torch.rand(config.input_dim) > 0.5).float() if config.input_rand_mask else torch.ones(config.input_dim)
-                        rand_mask = rand_mask.reshape(1, -1, 1, 1)
+                        if config.input_rand_mask:
+                            # Create a balanced distribution of mask patterns
+                            # Each sample will get one of three patterns with equal probability:
+                            # [1,0], [0,1], or [1,1]
+                            pattern_choice = torch.randint(0, 3, (inputs.shape[0],))
+                            rand_mask = torch.zeros(inputs.shape[0], config.input_dim)
+                            
+                            # Pattern [1,0]
+                            rand_mask[pattern_choice == 0, 0] = 1.0
+                            
+                            # Pattern [0,1]
+                            rand_mask[pattern_choice == 1, 1] = 1.0
+                            
+                            # Pattern [1,1]
+                            rand_mask[pattern_choice == 2, 0] = 1.0
+                            rand_mask[pattern_choice == 2, 1] = 1.0
+                        else:
+                            rand_mask = torch.ones(inputs.shape[0], config.input_dim)
+                        rand_mask = rand_mask.reshape(*rand_mask.shape, 1, 1)
                         inputs = inputs * rand_mask.to(inputs.device)
                         labels = inputs.clone()
                 else:
@@ -181,8 +198,25 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
                             labels = inputs.clone()
                         elif config.input_dim == 2:
                             inputs = torch.stack((inputs, labels), dim=1)
-                            rand_mask = (torch.rand(config.input_dim) > 0.5).float() if config.input_rand_mask else torch.ones(config.input_dim)
-                            rand_mask = rand_mask.reshape(1, -1, 1, 1)
+                            if config.input_rand_mask:
+                                # Create a balanced distribution of mask patterns
+                                # Each sample will get one of three patterns with equal probability:
+                                # [1,0], [0,1], or [1,1]
+                                pattern_choice = torch.randint(0, 3, (inputs.shape[0],))
+                                rand_mask = torch.zeros(inputs.shape[0], config.input_dim)
+                                
+                                # Pattern [1,0]
+                                rand_mask[pattern_choice == 0, 0] = 1.0
+                                
+                                # Pattern [0,1]
+                                rand_mask[pattern_choice == 1, 1] = 1.0
+                                
+                                # Pattern [1,1]
+                                rand_mask[pattern_choice == 2, 0] = 1.0
+                                rand_mask[pattern_choice == 2, 1] = 1.0
+                            else:
+                                rand_mask = torch.ones(inputs.shape[0], config.input_dim)
+                            rand_mask = rand_mask.reshape(*rand_mask.shape, 1, 1)
                             inputs = inputs * rand_mask.to(inputs.device)
                             labels = inputs.clone()
                     else:
@@ -389,7 +423,10 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
 
                 # process  
                 with torch.no_grad():
-                    latents = vqvae_model.encode(inputs.unsqueeze(1))
+                    if config.vqvae_dir == config.vqvae_refl_dir:
+                        latents = vqvae_model.encode(torch.stack((inputs, torch.zeros_like(inputs)), dim=1))
+                    else:
+                        latents = vqvae_model.encode(inputs.unsqueeze(1))
                     if config.well_cond_prob > 0:
                         with_well_mask = (torch.rand(len(inputs)) < config.well_cond_prob)
                         well_pos = torch.randint(high=config.image_size[0], size=(len(inputs),)).to(config.device)
@@ -422,7 +459,10 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                         dip_well = None
                         
                     if config.vqvae_refl_dir is not None:
-                        latents_refl = vqvae_refl_model.encode(refl.unsqueeze(1))
+                        if config.vqvae_dir == config.vqvae_refl_dir:
+                            latents_refl = vqvae_refl_model.encode(torch.stack((torch.zeros_like(refl), refl), dim=1))
+                        else:
+                            latents_refl = vqvae_refl_model.encode(refl.unsqueeze(1))
                         latents_refl, orig_shape = _to_sequence2(latents_refl)
                         with_refl_mask = (torch.rand(len(inputs)) < config.use_refl_prob)
                         latents_refl[:, ~with_refl_mask] = config.refl_vocab_size
@@ -430,7 +470,10 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                         latents_refl = None
 
                     if config.use_init_prob:
-                        latents_init = vqvae_model.encode(init.unsqueeze(1))
+                        if config.vqvae_dir == config.vqvae_refl_dir:
+                            latents_init = vqvae_model.encode(torch.stack((init, torch.zeros_like(init)), dim=1))
+                        else:
+                            latents_init = vqvae_model.encode(init.unsqueeze(1))
                         latents_init, _ = _to_sequence2(latents_init)
                         with_init_mask = (torch.rand(len(inputs)) < config.use_init_prob)
                         latents_init[:, ~with_init_mask] = config.vocab_size
@@ -566,7 +609,10 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                             dips = None
 
                     # process  
-                    latents = vqvae_model.encode(inputs.unsqueeze(1))
+                    if config.vqvae_dir == config.vqvae_refl_dir:
+                        latents = vqvae_model.encode(torch.stack((inputs, torch.zeros_like(inputs)), dim=1))
+                    else:
+                        latents = vqvae_model.encode(inputs.unsqueeze(1))
                     if config.well_cond_prob > 0:
                         with_well_mask = (torch.rand(len(inputs)) < config.well_cond_prob)
                         well_pos = torch.randint(high=config.image_size[0], size=(len(inputs),)).to(config.device)
@@ -599,7 +645,10 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                         dip_well = None
                         
                     if config.vqvae_refl_dir is not None:
-                        latents_refl = vqvae_refl_model.encode(refl.unsqueeze(1))
+                        if config.vqvae_dir == config.vqvae_refl_dir:
+                            latents_refl = vqvae_refl_model.encode(torch.stack((torch.zeros_like(refl), refl), dim=1))
+                        else:
+                            latents_refl = vqvae_refl_model.encode(refl.unsqueeze(1))
                         latents_refl, orig_shape = _to_sequence2(latents_refl)
                         with_refl_mask = (torch.rand(len(inputs)) < config.use_refl_prob)
                         latents_refl[:, ~with_refl_mask] = config.refl_vocab_size
@@ -607,7 +656,10 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                         latents_refl = None
 
                     if config.use_init_prob:
-                        latents_init = vqvae_model.encode(init.unsqueeze(1))
+                        if config.vqvae_dir == config.vqvae_refl_dir:
+                            latents_init = vqvae_model.encode(torch.stack((init, torch.zeros_like(init)), dim=1))
+                        else:
+                            latents_init = vqvae_model.encode(init.unsqueeze(1))
                         latents_init, _ = _to_sequence2(latents_init)
                         with_init_mask = (torch.rand(len(inputs)) < config.use_init_prob)
                         latents_init[:, ~with_init_mask] = config.vocab_size

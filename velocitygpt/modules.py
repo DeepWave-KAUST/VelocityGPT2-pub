@@ -167,14 +167,14 @@ class VQEmbedding(nn.Module):
         return z_q_x, z_q_x_bar
     
 class ResBlock(nn.Module):
-    def __init__(self, dim):
+    def __init__(self, dim, config):
         super().__init__()
         self.block = nn.Sequential(
             nn.ReLU(True),
-            nn.Conv2d(dim, dim, 3, 1, 1),
+            nn.Conv2d(dim, dim, 3, 1, 1, padding_mode=config.padding_mode),
             nn.BatchNorm2d(dim),
             nn.ReLU(True),
-            nn.Conv2d(dim, dim, 1),
+            nn.Conv2d(dim, dim, 1, padding_mode=config.padding_mode),
             nn.BatchNorm2d(dim)
         )
 

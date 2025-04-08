@@ -224,17 +224,17 @@ class VectorQuantizedVAE(nn.Module):
         super().__init__()
         if config.n_layer == 2:
             self.encoder = nn.Sequential(
-                nn.Conv2d(input_dim, dim, 4, 2, 1),
+                nn.Conv2d(input_dim, dim, 4, 2, 1, padding_mode=config.padding_mode),
                 nn.BatchNorm2d(dim),
                 nn.ReLU(True),
-                nn.Conv2d(dim, intermediate_dim, 4, 2, 1),
-                ResBlock(intermediate_dim),
-                ResBlock(intermediate_dim),
+                nn.Conv2d(dim, intermediate_dim, 4, 2, 1, padding_mode=config.padding_mode),
+                ResBlock(intermediate_dim, config),
+                ResBlock(intermediate_dim, config),
             )
 
             self.decoder = nn.Sequential(
-                ResBlock(intermediate_dim),
-                ResBlock(intermediate_dim),
+                ResBlock(intermediate_dim, config),
+                ResBlock(intermediate_dim, config),
                 nn.ReLU(True),
                 nn.ConvTranspose2d(intermediate_dim, dim, 4, 2, 1),
                 nn.BatchNorm2d(dim),
@@ -244,20 +244,20 @@ class VectorQuantizedVAE(nn.Module):
             )
         elif config.n_layer == 3:
             self.encoder = nn.Sequential(
-                nn.Conv2d(input_dim, dim, 4, 2, 1),
+                nn.Conv2d(input_dim, dim, 4, 2, 1, padding_mode=config.padding_mode),
                 nn.BatchNorm2d(dim),
                 nn.ReLU(True),
-                nn.Conv2d(dim, dim, 4, 2, 1),
+                nn.Conv2d(dim, dim, 4, 2, 1, padding_mode=config.padding_mode),
                 nn.BatchNorm2d(dim),
                 nn.ReLU(True),
-                nn.Conv2d(dim, intermediate_dim, 4, 2, 1),
-                ResBlock(intermediate_dim),
-                ResBlock(intermediate_dim),
+                nn.Conv2d(dim, intermediate_dim, 4, 2, 1, padding_mode=config.padding_mode),
+                ResBlock(intermediate_dim, config),
+                ResBlock(intermediate_dim, config),
             )
 
             self.decoder = nn.Sequential(
-                ResBlock(intermediate_dim),
-                ResBlock(intermediate_dim),
+                ResBlock(intermediate_dim, config),
+                ResBlock(intermediate_dim, config),
                 nn.ReLU(True),
                 nn.ConvTranspose2d(intermediate_dim, dim, 4, 2, 1),
                 nn.BatchNorm2d(dim),

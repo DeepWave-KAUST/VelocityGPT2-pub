@@ -73,6 +73,7 @@ def parse_args():
     parser.add_argument('--add_input_latent_noise', action='store_true')
     parser.add_argument('--input_noise_factor', type=float, default=0.1)
     parser.add_argument('--latent_noise_factor', type=float, default=0.1)
+    parser.add_argument('--padding_mode', type=str, default='zeros')
 
     # GPT Model parameters
     parser.add_argument('--latent_dim', type=int, nargs=2, default=[16, 16])

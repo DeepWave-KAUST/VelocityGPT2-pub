@@ -205,6 +205,12 @@ def get_previous_epoch_count(config):
             if 'epoch' in run.summary:
                 print(f"Resuming from epoch {run.summary['epoch']+1} (from W&B)")
                 return run.summary['epoch'] + 1
+            elif 'epoch' in run.history():
+                history = run.scan_history(keys=['epoch'])
+                if history:
+                    epoch = max([h['epoch'] for h in history])
+                    print(f"Resuming from epoch {epoch} (from W&B history)")
+                    return epoch + 1
             else:
                 warnings.warn("W&B run found but no epoch information available")
         except Exception as e:

@@ -92,7 +92,7 @@ def count_parameters(model):
 def save_all(model, avg_train_loss, avg_valid_loss, time_per_epoch, config, optim, scheduler):
     # Save everything
     print("Saving to", config.parent_dir)
-    if os.path.exists(os.path.join(config.parent_dir, 'model.pt')):
+    if os.path.exists(os.path.join(config.parent_dir, 'model.pt')) and config.cont_dir is None:
         if input("Path exists. Overwrite? (y/n)") == 'y':
             torch.save(model, os.path.join(config.parent_dir, 'model.pt'), pickle_module=dill)
             torch.save(optim.state_dict(), os.path.join(config.parent_dir, 'optim.pt'))

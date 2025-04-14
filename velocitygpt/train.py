@@ -387,7 +387,8 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
             acc_clf_train = 0
             for i, batch in enumerate(loop_train):
                 # initialize calculated gradients (from prev step)
-                optim.zero_grad()
+                if i % config.accum_grad == 0 or i == 0:
+                    optim.zero_grad()
 
                 # pull all tensor batches required for training
                 if config.dataset_type in ["fld2", "syn2"]:
@@ -514,7 +515,8 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                 loss.backward()
 
                 # update parameters
-                optim.step()
+                if (i+1) % config.accum_grad == 0:
+                    optim.step()
                 
                 # warmup and scheduler
                 if warmup is not None:

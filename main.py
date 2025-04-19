@@ -19,6 +19,10 @@ def parse_list_of_lists2(arg_value):
     # Assume the input is given in a specific format, like "1,2,3;4,5,6;7,8"
     return [list(map(str, group.split(','))) for group in arg_value.split(';')]
 
+def parse_list_of_lists3(arg_value):
+    # Assume the input is given in a specific format, like "1,2,3;4,5,6;7,8"
+    return [list(map(float, group.split(','))) for group in arg_value.split(';')]
+
 def parse_range(value):
     range_list = []
     for part in value.split(','):
@@ -39,7 +43,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="StorSeismic Fine-tune Denoising")
     # Data parameters
     parser.add_argument('--dataset', type=parse_list_of_lists2, required=True)
-    parser.add_argument('--prop', type=float, default=1)
+    parser.add_argument('--prop', type=parse_list_of_lists3, default=[[0, 1]])
     parser.add_argument('--train_prop', type=float, default=None)
     parser.add_argument('--dataset_path', type=parse_list_of_lists2, required=True)
     parser.add_argument('--dataset_type', type=str, default='syn1')

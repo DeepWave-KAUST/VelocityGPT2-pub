@@ -28,10 +28,16 @@ class ElasticGPTDataset(torch.utils.data.Dataset):
         self.data = data
         self.config = config
         if self.config is not None and self.data is None:
-            if train:
-                range = {'y': (0, config.train_prop*config.prop)} 
+            assert len(config.prop[0]) == 2, "Need to provide 2 values for prop y."
+            if len(config.prop) > 1:
+                assert len(config.prop[1]) == 2, "Need to provide 2 values for prop x."
+                range_x = {'x': (config.prop[1][0], config.prop[1][0]+config.prop[1][1])}
             else:
-                range = {'y': (config.train_prop*config.prop, 1*config.prop)}
+                range_x = {'x': (0, 1)}
+            if train:
+                range = {'y': (config.prop[0][0], config.prop[0][0]+config.train_prop*config.prop[0][1]), 'x': range_x['x']} 
+            else:
+                range = {'y': (config.prop[0][0]+config.train_prop*config.prop[0][1], config.prop[0][0]+1*config.prop[0][1]), 'x': range_x['x']} 
             dataset_path = [x[:2] for x in config.dataset_path]
             paths = [{'data': dp, 'label': lp, 'order': ('y', 'z', 'x'), 'range': range} for [dp, lp] in dataset_path]
             self.data = NpyDataset(paths=paths,

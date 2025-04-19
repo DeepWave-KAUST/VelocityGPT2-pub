@@ -61,6 +61,20 @@ class ElasticGPTDataset(torch.utils.data.Dataset):
                                             mmap_mode=None)
             else:
                 self.glob_pos = None
+        if config.use_init_prob and sum(config.transform_gaussian_sigma) == 0:
+            assert len(config.dataset_path[0]) == 3, "Need to provide initial model."
+            dataset_path = [[x[-1], x[-1]] for x in config.dataset_path]
+            paths = [{'data': dp, 'label': lp, 'order': ('y', 'z', 'x'), 'range': range} for [dp, lp] in dataset_path]
+            self.data2 = NpyDataset(paths=paths,
+                                    norm=0,
+                                    window_w=config.image_size[0],
+                                    window_h=config.image_size[1], 
+                                    stride_w=config.stride[0], 
+                                    stride_h=config.stride[1],
+                                    mode='windowed', 
+                                    line_mode='xline')
+        else:
+            self.data2 = None      
 
         self.transform = transform  # Accept a transform or None
 
@@ -75,15 +89,21 @@ class ElasticGPTDataset(torch.utils.data.Dataset):
                     sample['dip_seq'] = torch.tensor(self.glob_pos[idx][0]).long()
                     h, w =  self.config.image_size[1]//self.config.latent_dim[1], self.config.image_size[0]//self.config.latent_dim[0]
                     sample['dip_seq'] = sample['dip_seq'][::h, ::w].flatten()
+                if self.data2 is not None:
+                    sample['label2'], _ = self.data2[idx]
+                    sample['label2'] = torch.tensor(sample['label2'].T).float()
+                else:
+                    sample['label2'] = None
             else:
                 sample = {key: val[idx].clone().detach() for key, val in self.data.items()}
 
             sample['input'] = {'tensor': sample['input']}
             sample['label'] = {'tensor': sample['label']}
+            sample['label2'] = {'tensor': sample['label2']} if sample['label2'] is not None else {}
 
             # Apply the transform if specified
             if self.transform:
-                sample['input'], sample['label'], sample['label2'] = self.transform(sample['input'], sample['label'])
+                sample['input'], sample['label'], sample['label2'] = self.transform(sample['input'], sample['label'], sample['label2'])
         else:
             sample = {key: val[idx].clone().detach() for key, val in self.data.items()}
 
@@ -192,8 +212,8 @@ class DualTransform:
         self.transforms = transforms
         self.use_init_prob = config.use_init_prob
     
-    def __call__(self, tensor1, tensor2):
-        tensor3 = deepcopy(tensor1) if self.use_init_prob > 0 else {}
+    def __call__(self, tensor1, tensor2, tensor3={}):
+        tensor3 = deepcopy(tensor1) if self.use_init_prob > 0 and not tensor3 else tensor3
         for t in self.transforms:
             tensor1, tensor2, tensor3 = t(tensor1, tensor2, tensor3)
         return tensor1, tensor2, tensor3

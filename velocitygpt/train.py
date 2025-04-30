@@ -123,12 +123,6 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
                 # update parameters
                 optim.step()
                 
-                # warmup and scheduler
-                if warmup is not None:
-                    if i < len(train_dataloader)-1:
-                        with warmup.dampening():
-                            pass
-                
                 # calculate metrics
                 losses_train += loss.item()
                 with torch.no_grad():
@@ -168,13 +162,6 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
                 if i == 0:
                     nvsmi = nvidia_smi.getInstance()
                     gpu_memory_used = nvsmi.DeviceQuery('memory.used')['gpu'][0]['fb_memory_usage']['used']
-                    
-            if scheduler is not None:
-                if warmup is not None:
-                    with warmup.dampening():
-                        scheduler.step()
-                else:
-                    scheduler.step() 
                             
             model.eval()
             if verbose:
@@ -278,6 +265,23 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
             time_per_epoch.append(time.time() - epoch_time)
             avg_train_cu.append(cu_train / len(train_dataloader))
             avg_valid_cu.append(cu_valid / len(test_dataloader))
+
+            # warmup and scheduler
+            if scheduler is not None:
+                if warmup is not None:
+                    with warmup.dampening():
+                        if config.scheduler == "reduce_on_plateau":
+                            scheduler.step(avg_valid_loss[-1])
+                        else:
+                            scheduler.step()
+                else:
+                    if config.scheduler == "reduce_on_plateau":
+                        scheduler.step(avg_valid_loss[-1])
+                    else:
+                        scheduler.step()
+            elif warmup is not None:
+                with warmup.dampening():
+                    pass
             
             loop_epoch.set_description(f'Epoch {epoch}')
             loop_epoch.set_postfix(avg_valid_loss=avg_valid_loss[-1])
@@ -518,12 +522,6 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                 if (i+1) % config.accum_grad == 0:
                     optim.step()
                 
-                # warmup and scheduler
-                if warmup is not None:
-                    if i < len(train_dataloader)-1:
-                        with warmup.dampening():
-                            pass
-                
                 # calculate metrics
                 losses_train += loss.item()
                 losses_gen_train += loss_gen.item()
@@ -557,13 +555,6 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                 if i == 0:
                     nvsmi = nvidia_smi.getInstance()
                     gpu_memory_used = nvsmi.DeviceQuery('memory.used')['gpu'][0]['fb_memory_usage']['used']
-                    
-            if scheduler is not None:
-                if warmup is not None:
-                    with warmup.dampening():
-                        scheduler.step()
-                else:
-                    scheduler.step() 
                             
             model.eval()
             if verbose:
@@ -742,6 +733,23 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
             avg_valid_gen_loss.append(losses_gen_valid / len(test_dataloader))
             avg_train_clf_acc.append(acc_clf_train / len(train_dataloader))
             avg_valid_clf_acc.append(acc_clf_valid / len(test_dataloader))
+
+            # warmup and scheduler
+            if scheduler is not None:
+                if warmup is not None:
+                    with warmup.dampening():
+                        if config.scheduler == "reduce_on_plateau":
+                            scheduler.step(avg_valid_loss[-1])
+                        else:
+                            scheduler.step()
+                else:
+                    if config.scheduler == "reduce_on_plateau":
+                        scheduler.step(avg_valid_loss[-1])
+                    else:
+                        scheduler.step()
+            elif warmup is not None:
+                with warmup.dampening():
+                    pass
             
             loop_epoch.set_description(f'Epoch {epoch}')
             loop_epoch.set_postfix(avg_valid_loss=avg_valid_loss[-1])
@@ -862,12 +870,6 @@ def run_velup(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_d
             # update parameters
             optim.step()
             
-            # warmup and scheduler
-            if warmup is not None:
-                if i < len(train_dataloader)-1:
-                    with warmup.dampening():
-                        pass
-            
             # calculate metrics
             losses_train += loss.item()
             with torch.no_grad():
@@ -889,13 +891,6 @@ def run_velup(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_d
             if i == 0:
                 nvsmi = nvidia_smi.getInstance()
                 gpu_memory_used = nvsmi.DeviceQuery('memory.used')['gpu'][0]['fb_memory_usage']['used']
-                
-        if scheduler is not None:
-            if warmup is not None:
-                with warmup.dampening():
-                    scheduler.step()
-            else:
-                scheduler.step() 
                         
         model.eval()
         if verbose:
@@ -940,6 +935,23 @@ def run_velup(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_d
         avg_train_ssim.append(ssim_train / len(train_dataloader))
         avg_valid_ssim.append(ssim_valid / len(test_dataloader))
         time_per_epoch.append(time.time() - epoch_time)
+
+        # warmup and scheduler
+        if scheduler is not None:
+            if warmup is not None:
+                with warmup.dampening():
+                    if config.scheduler == "reduce_on_plateau":
+                        scheduler.step(avg_valid_loss[-1])
+                    else:
+                        scheduler.step()
+            else:
+                if config.scheduler == "reduce_on_plateau":
+                    scheduler.step(avg_valid_loss[-1])
+                else:
+                    scheduler.step()
+        elif warmup is not None:
+            with warmup.dampening():
+                pass
         
         loop_epoch.set_description(f'Epoch {epoch}')
         loop_epoch.set_postfix(avg_valid_loss=avg_valid_loss[-1])

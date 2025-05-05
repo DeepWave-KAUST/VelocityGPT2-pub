@@ -441,7 +441,7 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                         well_vel = well_vel[range(len(well_pos)), well_pos]
                         well_vel = well_vel.unsqueeze(1).repeat(1, config.image_size[0], 1)
                         latents_well = vqvae_model.encode(well_vel.unsqueeze(1))
-                        latents_well = latents_well[:, config.latent_dim[1]//2, :]
+                        latents_well = latents_well[:, config.latent_dim[0]//2, :]
                         
                         # Change unselected well_pos and latents_well to OOV
                         well_pos[~with_well_mask] = config.image_size[0]
@@ -458,7 +458,7 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                     if config.add_dip_to_well and config.use_dip and config.well_cond_prob:
                         well_pos2 = torch.clamp(well_pos.clone(), max=config.image_size[0]-1) 
                         dip_well = dips.clone()
-                        dip_well = dip_well.view(dip_well.shape[0], config.latent_dim[1], config.latent_dim[0])[range(len(well_pos2)), :, well_pos2//config.factor]
+                        dip_well = dip_well.view(dip_well.shape[0], config.latent_dim[0], config.latent_dim[1])[range(len(well_pos2)), :, well_pos2//config.factor]
                         dip_well = dip_well.view(dip_well.shape[0], -1)
                     else:
                         dip_well = None
@@ -615,7 +615,7 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                         well_vel = well_vel[range(len(well_pos)), well_pos]
                         well_vel = well_vel.unsqueeze(1).repeat(1, config.image_size[0], 1)
                         latents_well = vqvae_model.encode(well_vel.unsqueeze(1))
-                        latents_well = latents_well[:, config.latent_dim[1]//2, :]
+                        latents_well = latents_well[:, config.latent_dim[0]//2, :]
                         
                         # Change unselected well_pos and latents_well to OOV
                         well_pos[~with_well_mask] = config.image_size[0]
@@ -632,7 +632,7 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                     if config.add_dip_to_well and config.use_dip and config.well_cond_prob:
                         well_pos2 = torch.clamp(well_pos.clone(), max=config.image_size[0]-1) 
                         dip_well = dips.clone()
-                        dip_well = dip_well.view(dip_well.shape[0], config.latent_dim[1], config.latent_dim[0])[range(len(well_pos2)), :, well_pos2//config.factor]
+                        dip_well = dip_well.view(dip_well.shape[0], config.latent_dim[0], config.latent_dim[1])[range(len(well_pos2)), :, well_pos2//config.factor]
                         dip_well = dip_well.view(dip_well.shape[0], -1)
                     else:
                         dip_well = None

@@ -208,6 +208,19 @@ def main(args):
     warmup, scheduler = build_warmup_and_scheduler(args, optim)
     loss_fn = build_loss_fn(args)
 
+    idx_train = 0
+    while True:
+        data = train_data[idx_train]
+        if data['input']['tensor'].std() > 1e-6:
+            break
+        idx_train += 1
+    idx_test = 0
+    while True:
+        data = test_data[idx_test]
+        if data['input']['tensor'].std() > 1e-6:
+            break
+        idx_test += 1
+
     if "vqvae" in args.training_stage:
         model, avg_train_loss, avg_valid_loss, time_per_epoch = \
             run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_dataloader, scaler1,
@@ -228,10 +241,10 @@ def main(args):
             run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, loss_fn, train_dataloader, 
                     test_dataloader, scaler1, args, verbose=False)
     
-        plot_example(vqvae_model, vqvae_refl_model, model, train_data, scaler1[0], pad, args, [0], 
-                        idx_gen=[35], log=args.wandb_log, prefix=1)
-        plot_example(vqvae_model, vqvae_refl_model, model, test_data, scaler1[1], pad, args, [0], 
-                        idx_gen=[35], log=args.wandb_log, prefix=2)
+        plot_example(vqvae_model, vqvae_refl_model, model, train_data, scaler1[0], pad, args, [idx_train], 
+                        idx_gen=[args.image_size[1]//2], log=args.wandb_log, prefix=1)
+        plot_example(vqvae_model, vqvae_refl_model, model, test_data, scaler1[1], pad, args, [idx_test], 
+                        idx_gen=[args.image_size[1]//2], log=args.wandb_log, prefix=2)
                         
     if args.wandb_log:
         wandb.log({"total_params" : total_params})

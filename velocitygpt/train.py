@@ -263,7 +263,7 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
                         selected_outputs = (outputs.unsqueeze(1) / config.scaler2) + config.scaler3
                         selected_labels = (labels.unsqueeze(1) / config.scaler2) + config.scaler3
                     idx_start = i*config.batch_size
-                    idx_end = (i+1)*config.batch_size
+                    idx_end = len(scaler1[1]) if config.kmeans_full_fit else (i+1)*config.batch_size
                     psnr_valid += PSNR((selected_outputs * scaler1[1][idx_start:idx_end][:, None, None, None]).ravel(),
                                     (selected_labels * scaler1[1][idx_start:idx_end][:, None, None, None]).ravel())
                     ssim_valid += ssim((selected_outputs * scaler1[1][idx_start:idx_end][:, None, None, None]) + 1, 

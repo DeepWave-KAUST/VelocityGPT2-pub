@@ -263,14 +263,15 @@ def load_and_prep(config):
     return train_data, test_data, scaler1, pad
 
 def build_dataloader(config, train_data, test_data):
-    batch_size = config.batch_size
+    batch_size_train = len(train_data) if config.kmeans_full_fit else config.batch_size
+    batch_size_valid = len(test_data) if config.kmeans_full_fit else config.batch_size
 
     g = torch.Generator()
     g.manual_seed(config.seed)
 
-    train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=True, generator=g, worker_init_fn=seed_worker, 
+    train_dataloader = DataLoader(train_data, batch_size=batch_size_train, shuffle=True, generator=g, worker_init_fn=seed_worker, 
                                   num_workers=4, persistent_workers=True, prefetch_factor=8)
-    test_dataloader = DataLoader(test_data, batch_size=batch_size, shuffle=False, num_workers=4, 
+    test_dataloader = DataLoader(test_data, batch_size=batch_size_valid, shuffle=False, num_workers=4, 
                                  persistent_workers=True, prefetch_factor=8)
     
     return train_dataloader, test_dataloader
@@ -293,7 +294,10 @@ def build_model(config):
             model = VectorQuantizedVAE(config)
         elif config.vq_type == "vqvae2":
             model = VQVAE(config)
-
+        elif config.vq_type == "kmeans":
+            model = KMeansModel(config)
+            return model.to(config.device)
+        
         if config.cont_dir is not None:
             model.load_state_dict(load_from_pt_or_checkpoint(config.cont_dir, "model"))
             
@@ -372,12 +376,15 @@ def build_model(config):
 
 # Optimizer
 def build_optimizer(config, model):
-    if config.optim == "radam":
-        optim = RAdam(model.parameters(), lr=config.lr)
-    elif config.optim == "adam":
-        optim = torch.optim.Adam(model.parameters(), lr=config.lr)
-    elif config.optim == "adamw":
-        optim = torch.optim.AdamW(model.parameters(), lr=config.lr)
+    if config.vq_type == "kmeans":
+        return None
+    else:
+        if config.optim == "radam":
+            optim = RAdam(model.parameters(), lr=config.lr)
+        elif config.optim == "adam":
+            optim = torch.optim.Adam(model.parameters(), lr=config.lr)
+        elif config.optim == "adamw":
+            optim = torch.optim.AdamW(model.parameters(), lr=config.lr)
 
     if config.cont_dir is not None:
         optim.load_state_dict(load_from_pt_or_checkpoint(config.cont_dir, "optim"))

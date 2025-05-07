@@ -7,6 +7,7 @@ from torch.cuda.amp import autocast
 from einops import rearrange, pack, unpack
 import random
 from vector_quantize_pytorch import VectorQuantize, LFQ, FSQ
+from sklearn.cluster import MiniBatchKMeans
 
 from .modules import *
 
@@ -416,3 +417,57 @@ class VQVAE(nn.Module):
         dec = self.decode(quant_t, quant_b)
 
         return dec
+    
+class KMeansModel(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.kmeans_model = MiniBatchKMeans(n_clusters=config.K, batch_size=config.batch_size)  
+        self.full_fit = config.kmeans_full_fit
+        self.image_size = config.image_size
+        self.latent_dim = config.latent_dim
+        self.h, self.w = self.image_size[0] // self.latent_dim[0], self.image_size[1] // self.latent_dim[1]
+        self.last_image_size = None
+
+    def patchify(self, x, patch_size, stride):
+        x = x.unfold(-2, patch_size[0], stride[0]).unfold(-1, patch_size[1], stride[1])
+        x = x.reshape(x.shape[0], -1, patch_size[0], patch_size[1]).transpose(-1, -2)
+
+        return x
+
+    def unpatchify(self, x, patch_size, stride, orig_size):
+        x = x.transpose(-1, -2).reshape(x.shape[0], -1, self.latent_dim[0]*self.latent_dim[1])
+        x = F.fold(x, output_size=orig_size, kernel_size=patch_size, stride=stride)[:, 0]
+
+        return x
+    
+    def encode(self, x):
+        self.last_image_size = x.shape[-2:]
+        latent_dim = (x.shape[-2] // self.h, x.shape[-1] // self.w)
+        encoded = self.patchify(x.squeeze(1), (self.h, self.w), (self.h, self.w))
+        encoded = self.kmeans_model.predict(encoded.cpu().numpy().reshape(-1, self.h*self.w))
+        encoded = torch.tensor(encoded).reshape(x.shape[0], latent_dim[0], latent_dim[1])
+
+        return encoded.to(self.device)
+    
+    def decode(self, x):
+        assert self.last_image_size is not None, "last_image_size is None. Please encode first."
+        x = x.reshape(x.shape[0], -1)
+        x = self.kmeans_model.cluster_centers_[x.cpu().numpy()]
+        x = self.unpatchify(torch.tensor(x), (self.h, self.w), (self.h, self.w), self.last_image_size)
+
+        return torch.tensor(x).unsqueeze(1).to(self.device)
+    
+    def to(self, *args, **kwargs):
+        self = super().to(*args, **kwargs)
+        self.device = args[0]
+
+        return self
+    
+    def forward(self, x):
+        x = self.patchify(x.squeeze(1), (self.h, self.w), (self.h, self.w))
+        if self.full_fit:
+            self.kmeans_model.fit(x.cpu().numpy().reshape(-1, self.h*self.w))
+        else:
+            self.kmeans_model.partial_fit(x.cpu().numpy().reshape(-1, self.h*self.w))
+
+        return None

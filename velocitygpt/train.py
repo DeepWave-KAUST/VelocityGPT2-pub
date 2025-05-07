@@ -57,7 +57,10 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
         loop_epoch = tqdm(range(start_epoch, epochs))
         for epoch in loop_epoch:
             epoch_time = time.time()
-            lr_epoch.append(get_lr(optim))
+            if config.vq_type == "kmeans":
+                lr_epoch.append(0)
+            else:
+                lr_epoch.append(get_lr(optim))
             model.train()
             # setup loop with TQDM and dataloader
             if verbose:
@@ -68,9 +71,11 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
             psnr_train = 0
             ssim_train = 0
             cu_train = 0
-            for i, batch in enumerate(loop_train):
+            loop_train = tqdm(enumerate(loop_train), total=len(loop_train)) if config.vq_type == "kmeans" else enumerate(loop_train)
+            for i, batch in loop_train:
                 # initialize calculated gradients (from prev step)
-                optim.zero_grad()
+                if config.vq_type != "kmeans":
+                    optim.zero_grad()
 
                 # pull all tensor batches required for training
                 if config.dataset_type in ["fld2", "syn2"]:
@@ -110,21 +115,28 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
 
                 # process
     #             inputs = _to_sequence(inputs, config)
-                if config.vq_type == "vqvae":
-                    x_tilde, z_e_x, aux_loss, latents = model(inputs, return_latents=True)
-                    x_tilde = x_tilde * rand_mask.to(inputs.device) if config.input_dim == 2 else x_tilde
-                    loss = loss_fn(x_tilde, inputs, aux_loss)
-                elif config.vq_type == "vqvae2":
-                    x_tilde, latent_loss = model(inputs.unsqueeze(1))
-                    loss = loss_fn(x_tilde, inputs.unsqueeze(1), latent_loss)
+                if config.vq_type == "kmeans":
+                    model(inputs.unsqueeze(1))
+                    latents = model.encode(inputs.unsqueeze(1))
+                    x_tilde = model.decode(latents)
 
-                loss.backward()
+                    losses_train += 0
+                else:
+                    if config.vq_type == "vqvae":
+                        x_tilde, z_e_x, aux_loss, latents = model(inputs, return_latents=True)
+                        x_tilde = x_tilde * rand_mask.to(inputs.device) if config.input_dim == 2 else x_tilde
+                        loss = loss_fn(x_tilde, inputs, aux_loss)
+                    elif config.vq_type == "vqvae2":
+                        x_tilde, latent_loss = model(inputs.unsqueeze(1))
+                        loss = loss_fn(x_tilde, inputs.unsqueeze(1), latent_loss)
 
-                # update parameters
-                optim.step()
+                    loss.backward()
+
+                    # update parameters
+                    optim.step()
                 
-                # calculate metrics
-                losses_train += loss.item()
+                    # calculate metrics
+                    losses_train += loss.item()
                 with torch.no_grad():
     #                 outputs = _to_sequence(x_tilde, config, inv=True)
                     if config.input_dim == 1:
@@ -148,7 +160,7 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
                         selected_outputs = (outputs.unsqueeze(1) / config.scaler2) + config.scaler3
                         selected_labels = (labels.unsqueeze(1) / config.scaler2) + config.scaler3
                     idx_start = i*config.batch_size
-                    idx_end = (i+1)*config.batch_size
+                    idx_end = len(scaler1[0]) if config.kmeans_full_fit else (i+1)*config.batch_size
                     psnr_train += PSNR((selected_outputs * scaler1[0][idx_start:idx_end][:, None, None, None]).ravel(),
                                     (selected_labels * scaler1[0][idx_start:idx_end][:, None, None, None]).ravel())
                     ssim_train += ssim((selected_outputs * scaler1[0][idx_start:idx_end][:, None, None, None]) + 1, 
@@ -173,7 +185,8 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
             ssim_valid = 0
             cu_valid = 0
             with torch.no_grad():
-                for i, batch in enumerate(loop_valid):
+                loop_valid = tqdm(enumerate(loop_valid), total=len(loop_valid)) if config.vq_type == "kmeans" else enumerate(loop_valid)
+                for i, batch in loop_valid:
                     # pull all tensor batches required for training
                     if config.dataset_type in ["fld2", "syn2"]:
                         batch['input'] = {k: v.to(device) for k, v in batch['input'].items()}
@@ -212,16 +225,22 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
 
                     # process
     #                 inputs = _to_sequence(inputs, config)
-                    if config.vq_type == "vqvae":
-                        x_tilde, z_e_x, aux_loss, latents = model(inputs, return_latents=True)
-                        x_tilde = x_tilde * rand_mask.to(inputs.device) if config.input_dim == 2 else x_tilde
-                        loss = loss_fn(x_tilde, inputs, aux_loss)
-                    elif config.vq_type == "vqvae2":
-                        x_tilde, latent_loss = model(inputs)
-                        loss = loss_fn(x_tilde, inputs, latent_loss)
-                    
-                    # calculate metrics
-                    losses_valid += loss.item()
+                    if config.vq_type == "kmeans":
+                        latents = model.encode(inputs.unsqueeze(1))
+                        x_tilde = model.decode(latents)
+
+                        losses_valid += 0
+                    else:
+                        if config.vq_type == "vqvae":
+                            x_tilde, z_e_x, aux_loss, latents = model(inputs, return_latents=True)
+                            x_tilde = x_tilde * rand_mask.to(inputs.device) if config.input_dim == 2 else x_tilde
+                            loss = loss_fn(x_tilde, inputs, aux_loss)
+                        elif config.vq_type == "vqvae2":
+                            x_tilde, latent_loss = model(inputs)
+                            loss = loss_fn(x_tilde, inputs, latent_loss)
+                        
+                        # calculate metrics
+                        losses_valid += loss.item()
     #                 outputs = _to_sequence(x_tilde, config, inv=True)
                     if config.input_dim == 1:
                         outputs = x_tilde.squeeze(1)
@@ -332,10 +351,11 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
                     break
         
         if config.patience is not None:
-            model.load_state_dict(torch.load(checkpoint)['model'])
-            optim.load_state_dict(torch.load(checkpoint)['optim'])
-            if scheduler is not None:
-                scheduler.load_state_dict(torch.load(checkpoint)['scheduler'])
+            if config.vq_type != "kmeans":
+                model.load_state_dict(torch.load(checkpoint)['model'])
+                optim.load_state_dict(torch.load(checkpoint)['optim'])
+                if scheduler is not None:
+                    scheduler.load_state_dict(torch.load(checkpoint)['scheduler'])
     
     except KeyboardInterrupt:
         print("Stopped training, returning to last checkpoint...")

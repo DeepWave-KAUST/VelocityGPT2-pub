@@ -159,6 +159,8 @@ def plot_example(vqvae_model, vqvae_refl_model, model, data, scaler1, pad, confi
 
         # # Transform back to image
         orig_shape = (orig_shape[0], orig_shape[1], int(orig_shape[2]+(length/config.latent_dim[0])))
+        if hasattr(vqvae_model, 'last_image_size'):
+            vqvae_model.last_image_size = orig_shape[-2:]
         preds = _to_sequence2(preds, inv=True, orig_shape=orig_shape)
         with torch.no_grad():
             preds = vqvae_model.decode(preds).squeeze(1)
@@ -275,7 +277,9 @@ def plot_example2(model, data, scaler1, pad, config, idx, log=False, prefix=0):
                 elif config.vq_type == "vqvae2":
                     x_tilde, latent_loss = model(inputs)
                     _, _, _, *latents = model.encode(inputs)
-            
+                elif config.vq_type == "kmeans":
+                    latents = model.encode(inputs.unsqueeze(1))
+                    x_tilde = model.decode(latents)
     #         inputs = _to_sequence(inputs, config, inv=True)
             sample_output = x_tilde#.squeeze(1)
             if config.dataset_type in ["fld2", "syn2"]:

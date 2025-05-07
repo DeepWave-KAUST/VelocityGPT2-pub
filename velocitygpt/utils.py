@@ -95,7 +95,8 @@ def save_all(model, avg_train_loss, avg_valid_loss, time_per_epoch, config, opti
     if os.path.exists(os.path.join(config.parent_dir, 'model.pt')) and config.cont_dir is None:
         if input("Path exists. Overwrite? (y/n)") == 'y':
             torch.save(model, os.path.join(config.parent_dir, 'model.pt'), pickle_module=dill)
-            torch.save(optim.state_dict(), os.path.join(config.parent_dir, 'optim.pt'))
+            if optim is not None:
+                torch.save(optim.state_dict(), os.path.join(config.parent_dir, 'optim.pt'))
             if scheduler is not None:
                 torch.save(scheduler.state_dict(), os.path.join(config.parent_dir, 'scheduler.pt'))
             avg_train_loss_arr = np.array(avg_train_loss)
@@ -110,7 +111,8 @@ def save_all(model, avg_train_loss, avg_valid_loss, time_per_epoch, config, opti
             print("Saving failed.")
     else:
         torch.save(model, os.path.join(config.parent_dir, 'model.pt'), pickle_module=dill)
-        torch.save(optim.state_dict(), os.path.join(config.parent_dir, 'optim.pt'))
+        if optim is not None:
+            torch.save(optim.state_dict(), os.path.join(config.parent_dir, 'optim.pt'))
         if scheduler is not None:
             torch.save(scheduler.state_dict(), os.path.join(config.parent_dir, 'scheduler.pt'))
         avg_train_loss_arr = np.array(avg_train_loss)

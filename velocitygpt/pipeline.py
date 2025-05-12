@@ -270,7 +270,7 @@ def build_dataloader(config, train_data, test_data):
     g.manual_seed(config.seed)
 
     train_dataloader = DataLoader(train_data, batch_size=batch_size_train, shuffle=True, generator=g, worker_init_fn=seed_worker, 
-                                  num_workers=4, persistent_workers=True, prefetch_factor=8)
+                                  num_workers=4, persistent_workers=True, prefetch_factor=8, drop_last=True)
     test_dataloader = DataLoader(test_data, batch_size=batch_size_valid, shuffle=False, num_workers=4, 
                                  persistent_workers=True, prefetch_factor=8)
     

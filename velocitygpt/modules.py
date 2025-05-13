@@ -289,6 +289,8 @@ class Block(nn.Module):
             
         self.position_embedding_type = config.position_embedding_type
         self.num_heads = num_heads
+        self.cond_length = config.max_position_embeddings - config.max_length
+        self.unmask_condition = config.unmask_condition
 
     def forward(self, x):
         if self.attn_type == "default":
@@ -296,6 +298,8 @@ class Block(nn.Module):
                 (len(x), len(x)), -float("Inf"), device=x.device, dtype=x.dtype
             )
             attn_mask = torch.triu(attn_mask, diagonal=1)
+            if self.unmask_condition:
+                attn_mask[:self.cond_length, :self.cond_length] = 0
         elif self.attn_type == "linear":
             attn_mask = TriangularCausalMask(len(x), device=x.device)
         

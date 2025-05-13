@@ -116,6 +116,7 @@ def parse_args():
     parser.add_argument('--add_dip_to_well', action='store_true')
     parser.add_argument('--prepend_refl', action='store_true')
     parser.add_argument('--use_init_prob', type=float, default=0)
+    parser.add_argument('--unmask_condition', action='store_true')
 
     # SR model parameters
     parser.add_argument('--scale', type=int, default=4)

@@ -435,7 +435,7 @@ class KMeansModel(nn.Module):
         return x
 
     def unpatchify(self, x, patch_size, stride, orig_size):
-        x = x.transpose(-1, -2).reshape(x.shape[0], -1, self.latent_dim[0]*self.latent_dim[1])
+        x = x.transpose(-1, -2).reshape(x.shape[0], -1, x.shape[-2]*x.shape[-1])
         x = F.fold(x, output_size=orig_size, kernel_size=patch_size, stride=stride)[:, 0]
 
         return x

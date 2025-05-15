@@ -73,6 +73,7 @@ class GPT2(nn.Module):
         self.prepend_refl = config.prepend_refl
         self.vocab_size = config.vocab_size
         self.use_init_prob = config.use_init_prob
+        self.broadcast_glob_pos = config.broadcast_glob_pos
     
     def forward(self, x, cls=None, well_pos=None, well_token=None, dip=None, refl=None, dip_well=None, init=None):
         length, batch = x.shape
@@ -102,7 +103,7 @@ class GPT2(nn.Module):
             use_dip_embed[dip[:, 0] == len(self.dip_bins)] = 0
             use_dip_embed = self.use_dip_embeddings(use_dip_embed).unsqueeze(0)
             dip_embed = self.dip_embeddings(dip).transpose(0, 1)
-            h[1:] += dip_embed[1:]
+            h += dip_embed
             h = torch.cat([use_dip_embed, h], axis=0)
             
         if self.vqvae_refl_dir is not None and refl is not None:
@@ -110,6 +111,8 @@ class GPT2(nn.Module):
             use_refl_embed[refl[0, :] == self.refl_vocab_size] = 0
             use_refl_embed = self.use_refl_embeddings(use_refl_embed).unsqueeze(0)
             refl_embed = self.refl_embeddings(refl)
+            if self.use_dip and dip is not None and self.broadcast_glob_pos:
+                refl_embed += dip_embed
             if self.prepend_refl:
                 h = torch.cat([use_refl_embed, refl_embed, h], axis=0)
             else:
@@ -129,6 +132,8 @@ class GPT2(nn.Module):
             use_init_embed[init[0, :] == self.vocab_size] = 0
             use_init_embed = self.use_init_embeddings(use_init_embed).unsqueeze(0)
             init_embed = self.token_embeddings(init)
+            if self.use_dip and dip is not None and self.broadcast_glob_pos:
+                init_embed += dip_embed
             h = torch.cat([use_init_embed, init_embed, h], axis=0)
             
         if not self.add_pos_first and self.position_embedding_type not in ["alibi", "none"]:

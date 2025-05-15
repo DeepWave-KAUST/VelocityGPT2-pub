@@ -17,7 +17,7 @@ from scipy.io import loadmat
 import math
 import gc
 import wandb
-from pynvml.smi import nvidia_smi
+# from pynvml.smi import nvidia_smi
 from pytorch_msssim import ssim
 import copy
 import pytorch_warmup as pw
@@ -172,8 +172,8 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
                     loop_train.set_postfix(loss=loss.item())
                 
                 if i == 0:
-                    nvsmi = nvidia_smi.getInstance()
-                    gpu_memory_used = nvsmi.DeviceQuery('memory.used')['gpu'][0]['fb_memory_usage']['used']
+                    # nvsmi = nvidia_smi.getInstance()
+                    gpu_memory_used = 0
                             
             model.eval()
             if verbose:
@@ -573,8 +573,8 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                     loop_train.set_postfix(loss=loss.item())
                 
                 if i == 0:
-                    nvsmi = nvidia_smi.getInstance()
-                    gpu_memory_used = nvsmi.DeviceQuery('memory.used')['gpu'][0]['fb_memory_usage']['used']
+                    # nvsmi = nvidia_smi.getInstance()
+                    gpu_memory_used = 0
                             
             model.eval()
             if verbose:
@@ -909,8 +909,8 @@ def run_velup(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_d
                 loop_train.set_postfix(loss=loss.item())
             
             if i == 0:
-                nvsmi = nvidia_smi.getInstance()
-                gpu_memory_used = nvsmi.DeviceQuery('memory.used')['gpu'][0]['fb_memory_usage']['used']
+                # nvsmi = nvidia_smi.getInstance()
+                gpu_memory_used = 0
                         
         model.eval()
         if verbose:

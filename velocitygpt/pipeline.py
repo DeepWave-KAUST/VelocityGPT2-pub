@@ -17,7 +17,7 @@ from scipy.io import loadmat
 import math
 import gc
 import wandb
-from pynvml.smi import nvidia_smi
+# from pynvml.smi import nvidia_smi
 from pytorch_msssim import ssim
 import copy
 import pytorch_warmup as pw

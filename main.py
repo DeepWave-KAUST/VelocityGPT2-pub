@@ -151,6 +151,7 @@ def parse_args():
     parser.add_argument('--recon_loss_fn', type=str, default='l2')
     parser.add_argument('--use_focal_loss', action='store_true')
     parser.add_argument('--accum_grad', type=int, default=1, help="Accumulate gradients every ... steps")
+    parser.add_argument('--use_drop_path', type=float, default=0)
 
     # Misc parameters
     parser.add_argument('--device', type=str, default='cuda')

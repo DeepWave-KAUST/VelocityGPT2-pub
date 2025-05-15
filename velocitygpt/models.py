@@ -50,8 +50,10 @@ class GPT2(nn.Module):
              self.use_init_embeddings = nn.Embedding(2, config.hidden_size)
 
         self.layers = nn.ModuleList()
-        for _ in range(config.num_hidden_layers):
-            self.layers.append(Block(config.hidden_size, config.num_attention_heads, config))
+        dpr = config.use_drop_path if config.use_drop_path else 0
+        dpr = [x.item() for x in torch.linspace(0, dpr, config.num_hidden_layers)]
+        for i in range(config.num_hidden_layers):
+            self.layers.append(Block(config.hidden_size, config.num_attention_heads, config, drop_path=dpr[i]))
 
         self.ln_f = nn.LayerNorm(config.hidden_size)
         self.head = nn.Linear(config.hidden_size//config.n_concat_token, config.vocab_size, bias=False)

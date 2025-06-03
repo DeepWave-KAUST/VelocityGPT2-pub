@@ -536,6 +536,7 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                     loss_clf = loss_fn(clf_logits, cls)
                     loss = loss_gen + loss_clf
 
+                loss = loss / config.accum_grad
                 loss.backward()
 
                 # update parameters

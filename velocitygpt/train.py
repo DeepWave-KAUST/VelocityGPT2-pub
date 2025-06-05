@@ -540,6 +540,8 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
 
                 # update parameters
                 if (i+1) % config.accum_grad == 0:
+                    if config.max_grad_norm > 0:
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm, norm_type=2)
                     optim.step()
                 
                 # calculate metrics

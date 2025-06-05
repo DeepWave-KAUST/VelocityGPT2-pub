@@ -118,6 +118,7 @@ def parse_args():
     parser.add_argument('--use_init_prob', type=float, default=0)
     parser.add_argument('--unmask_condition', action='store_true')
     parser.add_argument('--broadcast_glob_pos', action='store_true')
+    parser.add_argument('--adaln_glob_pos', action='store_true')
 
     # SR model parameters
     parser.add_argument('--scale', type=int, default=4)

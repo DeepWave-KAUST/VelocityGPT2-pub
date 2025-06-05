@@ -74,6 +74,7 @@ class GPT2(nn.Module):
         self.vocab_size = config.vocab_size
         self.use_init_prob = config.use_init_prob
         self.broadcast_glob_pos = config.broadcast_glob_pos
+        self.adaln_glob_pos = config.adaln_glob_pos
     
     def forward(self, x, cls=None, well_pos=None, well_token=None, dip=None, refl=None, dip_well=None, init=None):
         length, batch = x.shape
@@ -150,7 +151,7 @@ class GPT2(nn.Module):
 
         # transformer
         for layer in self.layers:
-            h = layer(h)
+            h = layer(h, pos=dip_embed if self.adaln_glob_pos else None)
 
         h = self.ln_f(h)
         

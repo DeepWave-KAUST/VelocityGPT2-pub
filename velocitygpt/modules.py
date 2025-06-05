@@ -246,6 +246,22 @@ class Decoder(nn.Module):
     def forward(self, input):
         return self.blocks(input)
 
+class AdaLN(nn.Module):
+    def __init__(self, d_model):
+        super().__init__()
+        self.to_gamma_beta = nn.Sequential(
+            nn.Linear(d_model, d_model*2),
+            nn.SiLU(),
+            nn.Linear(d_model*2, d_model*2, bias=True),
+        )
+        nn.init.zeros_(self.to_gamma_beta[-1].weight)        # “zero-init” trick
+    def forward(self, x, cond):                              # cond = pos_i
+        gamma, beta = self.to_gamma_beta(cond).chunk(2, -1)
+        if len(gamma) != len(x):
+            gamma = F.pad(gamma, (0, 0, 0, 0, x.shape[0] - gamma.shape[0], 0), value=0)
+            beta = F.pad(beta, (0, 0, 0, 0, x.shape[0] - beta.shape[0], 0), value=0)
+        return (1 + gamma) * x + beta
+
 class Block(nn.Module):
     def __init__(self, embed_dim, num_heads, config, drop_path=0.0):
         super(Block, self).__init__()
@@ -287,13 +303,16 @@ class Block(nn.Module):
             else:
                 self.slopes = nn.Parameter(torch.empty(attn_heads), requires_grad=True)
                 nn.init.normal_(self.slopes, -2, 1)
+
+        if config.adaln_glob_pos:
+            self.adaln_glob_pos = AdaLN(embed_dim)
             
         self.position_embedding_type = config.position_embedding_type
         self.num_heads = num_heads
         self.cond_length = config.max_position_embeddings - config.max_length
         self.unmask_condition = config.unmask_condition
 
-    def forward(self, x):
+    def forward(self, x, pos=None):
         if self.attn_type == "default":
             attn_mask = torch.full(
                 (len(x), len(x)), -float("Inf"), device=x.device, dtype=x.dtype
@@ -312,6 +331,8 @@ class Block(nn.Module):
             attn_mask += alibi.repeat(x.shape[1], attn_mask.shape[1], 1)#.to(x.device)
 
         x = self.ln_1(x)
+        if pos is not None and hasattr(self, 'adaln_glob_pos'):
+            x = self.adaln_glob_pos(x, pos)
         if self.attn_type == "default":
             a, _ = self.attn(x, x, x, attn_mask=attn_mask, need_weights=False)
         elif self.attn_type == "linear":

@@ -7,6 +7,11 @@ from torch.autograd import Function
 from fast_transformers.attention import AttentionLayer, CausalLinearAttention
 from fast_transformers.masking import TriangularCausalMask, LengthMask
 from linear_attention_transformer.linear_attention_transformer import SelfAttention
+from typing import Optional
+from rotary_embedding_torch import (
+    RotaryEmbedding,
+    apply_rotary_emb
+)
 
 class Quantize(nn.Module):
     def __init__(self, dim, n_embed, decay=0.99, eps=1e-5):
@@ -262,6 +267,471 @@ class AdaLN(nn.Module):
             beta = F.pad(beta, (0, 0, 0, 0, x.shape[0] - beta.shape[0], 0), value=0)
         return (1 + gamma) * x + beta
 
+class KVCache(nn.Module):
+    """
+    Standalone ``nn.Module`` containing a kv-cache to cache past key and values during inference.
+
+    Args:
+        batch_size (int): batch size model will be run with
+        max_seq_len (int): maximum sequence length model will be run with
+        num_kv_heads (int): number of key/value heads.
+        head_dim (int): per-attention head embedding dimension
+        dtype (torch.dtype): dtype for the caches
+    """
+
+    def __init__(
+        self,
+        batch_size: int,
+        max_seq_len: int,
+        num_kv_heads: int,
+        head_dim: int,
+        dtype: torch.dtype,
+    ) -> None:
+        super().__init__()
+        cache_shape = (batch_size, num_kv_heads, max_seq_len, head_dim)
+        self.register_buffer(
+            "k_cache", torch.zeros(cache_shape, dtype=dtype), persistent=False
+        )
+        self.register_buffer(
+            "v_cache", torch.zeros(cache_shape, dtype=dtype), persistent=False
+        )
+        self.register_buffer(
+            "cache_pos", torch.arange(0, cache_shape[2]), persistent=False
+        )
+        self.batch_size = batch_size
+
+    def reset(self) -> None:
+        """Reset the cache to zero."""
+        self.k_cache.zero_()
+        self.v_cache.zero_()
+        self.cache_pos -= self.size
+
+    @property
+    def size(self) -> int:
+        return self.cache_pos[0].item()
+
+    def update(
+        self, k_val: torch.Tensor, v_val: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Update KV cache with the new ``k_val``, ``v_val`` and return the updated cache.
+
+        Note:
+            When updating the KV cache, it is assumed that subsequent updates should update key-value
+            positions in consecutive sequence positions. If you wish to update cache values which have
+            already been filled, use ``.reset()``, which will reset the cache to the zero-th position.
+
+        Example:
+            >>> cache = KVCache(batch_size=2, num_kv_heads=4, max_seq_len=16, head_dim=32, dtype=torch.bfloat16)
+            >>> keys, values = torch.ones((2, 4, 8, 32)), torch.ones((2, 4, 8, 32))
+            >>> cache.update(keys, values)
+            >>> # now positions 0 through 7 are filled
+            >>> cache.size
+            >>> 8
+            >>> keys, values = torch.ones((2, 4, 1, 32)), torch.ones((2, 4, 1, 32))
+            >>> cache.update(keys, values)
+            >>> # this will fill at position 8
+            >>> cache.size
+            >>> 9
+
+        Args:
+            k_val (torch.Tensor): Current key tensor with shape [B, H, S, D]
+            v_val (torch.Tensor): Current value tensor with shape [B, H, S, D]
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor]: Updated key and value cache tensors, respectively.
+
+        Raises:
+            ValueError: if the batch size of the new key (or value) tensor is greater than the batch size
+                used during cache setup.
+
+        Note:
+            This function will raise an ``AssertionError`` if the sequence length of ``k_val``
+                is longer than the maximum cache sequence length.
+
+        """
+        bsz, _, seq_len, _ = k_val.shape
+        if bsz > self.k_cache.shape[0]:
+            raise ValueError(
+                f"The current cache has been setup with a batch size of {self.k_cache.shape[0]}"
+                f", but found new key tensors with batch size {k_val.shape[0]}!"
+            )
+
+        assert (self.cache_pos[0] + seq_len) <= self.k_cache.shape[2]
+        k_out = self.k_cache
+        v_out = self.v_cache
+
+        k_out[:, :, self.cache_pos[:seq_len]] = k_val
+        v_out[:, :, self.cache_pos[:seq_len]] = v_val
+
+        # forward cache_pos seq_len positions along
+        # cache_pos starts at (0, 1, 2, 3, 4, 5, ...)
+        # an update of seq_len = 5 tokens brings it to
+        # (5, 6, 7, 8, 9, ...)
+        # this allows us to track the current position in the cache
+        # after the last update in a compile-friendly way without any dynamism
+        # e.g. relying on an int size tracker, or re-creating cache_pos every time
+        self.cache_pos.add_(seq_len)
+
+        return k_out, v_out
+
+class MultiHeadAttention(nn.Module):
+    """Multi-headed attention layer with support for grouped query
+    attention (GQA) introduced in https://arxiv.org/abs/2305.13245v1.
+
+    GQA is a version of multiheaded attention (MHA) which uses fewer
+    key/value heads than query heads by grouping n query heads for each
+    key and value head. Multi-Query Attention is an extreme
+    version where we have a single key and value head shared by all
+    query heads.
+
+    Following is an example of MHA, GQA and MQA with num_heads = 4
+
+    (credit for the documentation:
+    `litgpt.Config <https://github.com/Lightning-AI/litgpt/blob/eda1aaaf391fd689664f95487ab03dc137e213fd/litgpt/config.py>`_).
+
+
+    ::
+
+        ┌───┐┌───┐┌───┐┌───┐     ┌───┐    ┌───┐             ┌───┐
+        │ v ││ v ││ v ││ v │     │ v │    │ v │             │ v │
+        └───┘└───┘└───┘└───┘     └───┘    └───┘             └───┘
+        │    │    │    │         │        │                 │
+        ┌───┐┌───┐┌───┐┌───┐     ┌───┐    ┌───┐             ┌───┐
+        │ k ││ k ││ k ││ k │     │ k │    │ k │             │ k │
+        └───┘└───┘└───┘└───┘     └───┘    └───┘             └───┘
+        │    │    │    │      ┌──┴──┐  ┌──┴──┐      ┌────┬──┴─┬────┐
+        ┌───┐┌───┐┌───┐┌───┐  ┌───┐┌───┐┌───┐┌───┐  ┌───┐┌───┐┌───┐┌───┐
+        │ q ││ q ││ q ││ q │  │ q ││ q ││ q ││ q │  │ q ││ q ││ q ││ q │
+        └───┘└───┘└───┘└───┘  └───┘└───┘└───┘└───┘  └───┘└───┘└───┘└───┘
+        ◀──────────────────▶  ◀──────────────────▶  ◀──────────────────▶
+                MHA                    GQA                   MQA
+        n_kv_heads =4          n_kv_heads=2           n_kv_heads=1
+
+    Args:
+        embed_dim (int): embedding dimension for the model
+        num_heads (int): number of query heads. For MHA this is also the
+            number of heads for key and value
+        num_kv_heads (int): number of key and value heads. User should ensure
+            ``num_heads % num_kv_heads == 0``. For standard MHA set ``num_kv_heads == num_heads``,
+            for GQA ``num_kv_heads < num_heads``, and for MQA set ``num_kv_heads == 1``.
+        head_dim (int): dimension of each head, calculated by ``embed_dim // num_heads``.
+        q_proj (nn.Module): projection layer for query.
+        k_proj (nn.Module): projection layer for key.
+        v_proj (nn.Module): projection layer for value.
+        output_proj (nn.Module): projection layer for output.
+        pos_embeddings (Optional[nn.Module]): positional embeddings layer, e.g. RotaryPositionalEmbeddings.
+        q_norm (Optional[nn.Module]): normalization layer for query, e.g. RMSNorm. For decoding, this is applied
+            before updating from kv_cache. This means it will only support token wide normalization and not
+            batch or sequence wide normalization.
+        k_norm (Optional[nn.Module]): normalization layer for key, must be set if q_norm is.
+        kv_cache (Optional[KVCache]): KVCache object used to cache key and value
+        max_seq_len (int): maximum sequence length supported by the model.
+            This is needed to compute the RoPE Cache. Default: 4096.
+        is_causal (bool): sets the default mask to causal when no mask is provided
+        attn_dropout (float): dropout value passed onto the scaled_dot_product_attention function.
+            Default value is 0.0.
+
+    Raises:
+        ValueError:
+            If ``num_heads % num_kv_heads != 0``, **or**
+            if ``embed_dim % num_heads != 0``, **or**
+            if ``attn_dropout < 0`` or ``attn_dropout > 1``, **or**
+            if q_norm is defined without k_norm or vice versa
+    """
+
+    def __init__(
+        self,
+        *,
+        embed_dim: int,
+        num_heads: int,
+        num_kv_heads: int,
+        head_dim: int,
+        q_proj: nn.Module,
+        k_proj: nn.Module,
+        v_proj: nn.Module,
+        output_proj: nn.Module,
+        pos_embeddings: Optional[nn.Module] = None,
+        q_norm: Optional[nn.Module] = None,
+        k_norm: Optional[nn.Module] = None,
+        kv_cache: Optional[KVCache] = None,
+        max_seq_len: int = 4096,
+        is_causal: bool = True,
+        attn_dropout: float = 0.0,
+        bias: Optional[nn.Module] = None,
+    ) -> None:
+        super().__init__()
+        if num_heads % num_kv_heads != 0:
+            raise ValueError(
+                f"num_heads ({num_heads}) must be divisible by "
+                f"num_kv_heads ({num_kv_heads})"
+            )
+
+        if embed_dim % num_heads != 0:
+            raise ValueError(
+                f"embed_dim ({embed_dim}) must be divisible by num_heads ({num_heads})"
+            )
+
+        if attn_dropout < 0 or attn_dropout > 1:
+            raise ValueError(f"attn_dropout ({embed_dim}) must be between 0.0 and 1.0")
+
+        if bool(q_norm) ^ bool(k_norm):
+            raise ValueError("q and k norm must be set together")
+
+        # Set attributes
+        self.num_heads = num_heads
+        self.num_kv_heads = num_kv_heads
+        self.embed_dim = embed_dim
+        self.attn_dropout = attn_dropout
+        self.head_dim = head_dim
+        self.max_seq_len = max_seq_len
+        self.is_causal = is_causal
+
+        # Set layers
+        self.kv_cache = kv_cache
+        self.q_proj = q_proj
+        self.k_proj = k_proj
+        self.v_proj = v_proj
+        self.output_proj = output_proj
+        self.q_norm = q_norm
+        self.k_norm = k_norm
+        self.pos_embeddings = pos_embeddings
+
+        def _sdpa_call(
+            q: torch.Tensor,
+            k: torch.Tensor,
+            v: torch.Tensor,
+            mask: Optional[torch.Tensor],
+            dropout_p: float,
+            is_causal: bool,
+        ) -> torch.Tensor:
+            # shape: [b, 1, s, s]
+            if mask.ndim == 2:
+                mask = mask.unsqueeze(0)
+            if mask is not None:
+                mask = mask[:, None, :, :]
+
+            # Flash attention from https://pytorch.org/blog/accelerating-large-language-models/
+            return nn.functional.scaled_dot_product_attention(
+            q, k, v, attn_mask=mask, dropout_p=dropout_p, is_causal=is_causal
+        )
+        self._attention_call = _sdpa_call
+
+        # this flag indicates whether to update the kv-cache during forward
+        # passes. when disabled, we can have the cache setup but still
+        # perform normal forward passes
+        self.cache_enabled = False
+
+    def setup_cache(
+        self, batch_size: int, dtype: torch.dtype, max_seq_len: int
+    ) -> None:
+        """Setup key value caches for attention calculation. If called
+        after kv_cache is already setup, this will be skipped.
+
+        Args:
+            batch_size (int): batch size for the caches.
+            dtype (torch.dtype): dtype for the caches.
+            max_seq_len (int): maximum sequence length model will be run with.
+        """
+        # Don't overwrite user defined kv_cache from init
+        if self.kv_cache is not None:
+            print(
+                "Key value caches are already setup. You cannot call ``setup_caches()`` twice. Skipping."
+            )
+        else:
+            self.kv_cache = KVCache(
+                batch_size=batch_size,
+                max_seq_len=max_seq_len,
+                num_kv_heads=self.num_kv_heads,
+                head_dim=self.head_dim,
+                dtype=dtype,
+            )
+            self.cache_enabled = True
+
+    def reset_cache(self):
+        """Reset the key value caches."""
+        if self.kv_cache is None:
+            raise RuntimeError(
+                "Key value caches are not setup. Call ``setup_caches()`` first."
+            )
+        self.kv_cache.reset()
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        y: Optional[torch.Tensor] = None,
+        *,
+        mask: Optional[torch.Tensor] = None,
+        input_pos: Optional[torch.Tensor] = None,
+        bias: Optional[nn.Module] = None,
+    ) -> torch.Tensor:
+        """
+        Args:
+            x (torch.Tensor): input tensor with shape [b x s_x x d] for the query
+            y (Optional[torch.Tensor]): second input tensor with shape [b x s_y x d], is the input
+                for k and v. For self attention, x=y. Optional only with kv_cache enabled.
+            mask (Optional[_MaskType]): Used to mask the scores after the query-key multiplication
+                and before the softmax. Either:
+
+                A boolean tensor with shape ``[b x s x s]``, ``[b x s x self.encoder_max_cache_seq_len]``,
+                or ``[b x s x self.decoder_max_cache_seq_len]`` if using KV-cacheing with encoder/decoder layers.
+                A value of True in row ``i`` and column ``j`` means token ``i`` attends to token ``j``. A value of False means
+                token ``i`` does not attend to token ``j``. If no mask is specified, a causal mask
+                is used by default.
+
+                A :class:`~torch.nn.attention.flex_attention.BlockMask` for document masking in a packed sequence
+                created via `create_block_mask <https://pytorch.org/blog/flexattention/#mask-mods>`_. We  use
+                :func:`~torch.nn.attention.flex_attention.flex_attention` when computing attention with block masks.
+                Default is None.
+            input_pos (Optional[torch.Tensor]): Optional tensor which contains the position ids
+                of each token. During training, this is used to indicate the positions
+                of each token relative to its sample when packed, shape [b x s].
+                During inference, this indicates the position of the current token.
+                If none, assume the index of the token is its position id. Default is None.
+
+        Raises:
+            ValueError: If no ``y`` input and ``kv_cache`` is not enabled.
+
+        Returns:
+            torch.Tensor: output tensor with attention applied
+
+        Notation used for tensor shapes:
+            - b: batch size
+            - s_x: sequence length for x
+            - s_y: sequence length for y
+            - n_h: num heads
+            - n_kv: num kv heads
+            - d: embed dim
+            - h_d: head dim
+        """
+        # x has shape [b, s_x, d]
+        # y has shape [b, s_y, d]
+        b, s_x, d = x.shape
+        s_y = y.shape[1] if y is not None else 0
+
+        # q has shape [b, s_x, num_heads * head_dim]
+        q = self.q_proj(x)
+        if bias is not None:
+            if isinstance(bias, RotaryEmbedding):
+                if bias.freqs_for == "pixel":
+                    # Pad if s_x is not divisible by latent_dim
+                    pad_len = bias.latent_dim[0] - (s_x % bias.latent_dim[0]) if (s_x % bias.latent_dim[0]) != 0 else 0
+                    q = F.pad(q, (0, 0, 0, pad_len), value=0)
+                    q = q.view(b, bias.latent_dim[0], -1, d)
+                    # Apply 2d RoPE
+                    freqs = bias.get_axial_freqs(*q.shape[1:-1])
+                    q = apply_rotary_emb(freqs, q)
+                    # Remove padding if applied
+                    q = q.flatten(1, 2)[:, :s_x, :]
+
+        # number of queries per key/value
+        q_per_kv = self.num_heads // self.num_kv_heads
+        q = q.view(b, s_x, self.num_kv_heads * q_per_kv, self.head_dim)
+
+        # Apply positional embeddings
+        if self.pos_embeddings is not None:
+            q = self.pos_embeddings(q, input_pos=input_pos)
+
+        # [b, n_h, s_x, h_d]
+        q = q.transpose(1, 2)
+        if bias is not None:
+            if isinstance(bias, RotaryEmbedding):
+                if bias.freqs_for == "lang":
+                    q = bias.rotate_queries_or_keys(q)
+
+        # Normalize q
+        if self.q_norm is not None:
+            q = self.q_norm(q)
+
+        if y is None:
+            if self.kv_cache is None or not self.cache_enabled:
+                raise ValueError(
+                    "Must provide y input or use kv_cache to enable streaming decoding"
+                )
+            k = self.kv_cache.k_cache
+            v = self.kv_cache.v_cache
+        else:
+            # Update k and v shape, positional embeddings, and normalization
+
+            # k,v shape [b, s_y, num_kv_heads * head_dim]
+            k = self.k_proj(y)
+            v = self.v_proj(y)
+
+            if bias is not None:
+                if isinstance(bias, RotaryEmbedding):
+                    if bias.freqs_for == "pixel":
+                        # Pad if s_x is not divisible by latent_dim
+                        pad_len = bias.latent_dim[0] - (s_x % bias.latent_dim[0]) if (s_x % bias.latent_dim[0]) != 0 else 0
+                        k = F.pad(k, (0, 0, 0, pad_len), value=0)
+                        k = k.view(b, bias.latent_dim[0], -1, d)
+                        # Apply 2d RoPE
+                        freqs = bias.get_axial_freqs(*k.shape[1:-1])
+                        k = apply_rotary_emb(freqs, k)
+                        # Remove padding if applied
+                        k = k.flatten(1, 2)[:, :s_x, :]
+
+            # Apply positional embeddings
+            # k,v shape: [b, s_y, n_kv, h_d]
+            k = k.view(b, s_y, -1, self.head_dim)
+            v = v.view(b, s_y, -1, self.head_dim)
+            if self.pos_embeddings is not None:
+                k = self.pos_embeddings(k, input_pos=input_pos)
+
+            # k,v shape: [b, n_kv, s_y, h_d]
+            k = k.transpose(1, 2)
+            v = v.transpose(1, 2)
+
+            if bias is not None:
+                if isinstance(bias, RotaryEmbedding):
+                    if bias.freqs_for == "lang":
+                        k = bias.rotate_queries_or_keys(k)
+
+            # Normalize k
+            if self.k_norm is not None:
+                k = self.k_norm(k)
+
+            # Update key-value cache
+            if self.kv_cache is not None and self.cache_enabled:
+                k, v = self.kv_cache.update(k, v)
+
+        # If needed, expand the key and value tensors to have the same shape
+        # as the query tensor by copying values across the relevant dim
+        # k,v shape: [b, n_kv, s, h_d] -> [b, n_h, s, h_d]
+        if self.num_heads != self.num_kv_heads:
+            expand_shape = (b, self.num_kv_heads, q_per_kv, -1, self.head_dim)
+            k = k.unsqueeze(2).expand(expand_shape).flatten(1, 2)
+            v = v.unsqueeze(2).expand(expand_shape).flatten(1, 2)
+
+        # if bias is not None:
+        #     if isinstance(bias, RotaryEmbedding):
+        #         if bias.freqs_for == "pixel":
+        #             # Pad if s_x is not divisible by latent_dim
+        #             pad_len = bias.latent_dim[0] - (s_x % bias.latent_dim[0]) if (s_x % bias.latent_dim[0]) != 0 else 0
+        #             q = F.pad(q, (0, 0, 0, pad_len), value=0)
+        #             k = F.pad(k, (0, 0, 0, pad_len), value=0)
+        #             q = q.view(b, self.num_kv_heads * q_per_kv, bias.latent_dim[0], -1, self.head_dim)
+        #             k = k.view(b, self.num_kv_heads * q_per_kv, bias.latent_dim[0], -1, self.head_dim)
+        #             # Apply 2d RoPE
+        #             freqs = bias.get_axial_freqs(*q.shape[2:-1])
+        #             q = apply_rotary_emb(freqs, q)
+        #             k = apply_rotary_emb(freqs, k)
+        #             # Remove padding if applied
+        #             q = q.flatten(2, 3)[:, :, :s_x, :]
+        #             k = k.flatten(2, 3)[:, :, :s_x, :]
+        
+        output = self._attention_call(
+            q,
+            k,
+            v,
+            # mask=F.pad(mask, (0, k.shape[-2]- mask.shape[-1], 0, 0), value=float("-inf") if mask.dtype != torch.bool else False),
+            mask=mask,
+            dropout_p=self.attn_dropout if self.training else 0.0,
+            is_causal=self.kv_cache is None and mask is None and self.is_causal,
+        )
+
+        # reshape the output to be the same shape as the input
+        output = output.transpose(1, 2).contiguous().view(b, s_x, -1)
+        return self.output_proj(output)
+
 class Block(nn.Module):
     def __init__(self, embed_dim, num_heads, config, drop_path=0.0):
         super(Block, self).__init__()
@@ -269,7 +739,16 @@ class Block(nn.Module):
         self.ln_1 = nn.LayerNorm(embed_dim)
         self.ln_2 = nn.LayerNorm(embed_dim)
         if config.attn_type == "default":
-            self.attn = nn.MultiheadAttention(embed_dim, num_heads)
+            self.attn = MultiHeadAttention(
+                embed_dim=embed_dim,
+                num_heads=num_heads,
+                num_kv_heads=num_heads,
+                head_dim=embed_dim // num_heads,
+                q_proj=nn.Linear(embed_dim, embed_dim, bias=True),
+                k_proj=nn.Linear(embed_dim, embed_dim, bias=True),
+                v_proj=nn.Linear(embed_dim, embed_dim, bias=True),
+                output_proj=nn.Linear(embed_dim, embed_dim, bias=True)
+            )
         elif config.attn_type == "linear":
             self.attn = AttentionLayer(CausalLinearAttention(embed_dim), embed_dim, num_heads)
         elif config.attn_type == "linear2":
@@ -303,6 +782,19 @@ class Block(nn.Module):
             else:
                 self.slopes = nn.Parameter(torch.empty(attn_heads), requires_grad=True)
                 nn.init.normal_(self.slopes, -2, 1)
+        elif config.position_embedding_type == "rope_2d":
+            self.bias = RotaryEmbedding(
+                dim = config.position_embedding_dim,
+                freqs_for = 'pixel',
+                max_freq = config.position_embedding_max_freq
+            )
+            self.bias.latent_dim = config.latent_dim
+        elif config.position_embedding_type == "rope_1d":
+            self.bias = RotaryEmbedding(
+                dim = config.position_embedding_dim,
+            )
+        else:
+            self.bias = None
 
         if config.adaln_glob_pos:
             self.adaln_glob_pos = AdaLN(embed_dim)
@@ -334,7 +826,12 @@ class Block(nn.Module):
         if pos is not None and hasattr(self, 'adaln_glob_pos'):
             x = self.adaln_glob_pos(x, pos)
         if self.attn_type == "default":
-            a, _ = self.attn(x, x, x, attn_mask=attn_mask, need_weights=False)
+            a = self.attn(
+                    x.transpose(0, 1), 
+                    x.transpose(0, 1),
+                    mask=attn_mask,
+                    bias=self.bias
+                ).transpose(0, 1)
         elif self.attn_type == "linear":
             x = x.transpose(0, 1)
             a = self.attn(x, x, x, 
@@ -349,6 +846,9 @@ class Block(nn.Module):
         x = x + self.drop_path(a)
         m = self.mlp(self.ln_2(x))
         x = x + self.drop_path(m)
+        if self.position_embedding_type == "peg":
+            N, B, C = x.shape
+            
         return x
     
 class WDSRBlock(nn.Module):

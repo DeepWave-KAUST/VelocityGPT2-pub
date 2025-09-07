@@ -81,7 +81,7 @@ class GPT2(nn.Module):
         
         h = self.token_embeddings(x)
         
-        if self.add_pos_first and self.position_embedding_type not in ["alibi", "none"]:
+        if self.add_pos_first and self.position_embedding_type == "learnable":
             positions = torch.arange(length, device=x.device).unsqueeze(-1)
             h = h + self.position_embeddings(positions).expand_as(h)
         
@@ -137,7 +137,7 @@ class GPT2(nn.Module):
                 init_embed += dip_embed
             h = torch.cat([use_init_embed, init_embed, h], axis=0)
             
-        if not self.add_pos_first and self.position_embedding_type not in ["alibi", "none"]:
+        if not self.add_pos_first and self.position_embedding_type == "learnable":
             # add positional embeddings
             if self.well_cond_prob > 0 or self.use_dip or self.vqvae_refl_dir is not None:
                 positions = torch.arange(len(h)//self.n_concat_token, device=x.device).unsqueeze(-1)
@@ -145,7 +145,7 @@ class GPT2(nn.Module):
                 positions = torch.arange(length//self.n_concat_token, device=x.device).unsqueeze(-1)
             h = h + self.position_embeddings(positions).expand_as(h)
             
-        if self.double_pos and not self.position_embedding_type not in ["alibi", "none"]:
+        if self.double_pos and not self.position_embedding_type == "learnable":
             positions = torch.arange(length//self.n_concat_token, device=x.device).unsqueeze(-1)
             h = h + self.position_embeddings2(positions).expand_as(h)
 

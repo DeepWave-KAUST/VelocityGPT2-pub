@@ -32,6 +32,7 @@ from .pytorchtools import EarlyStopping
 from .utils import *
 from .utils import _to_sequence2
 from .quantizer import FSQ
+from .vis import sample
 
 def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_dataloader, scaler1, config, 
                plot=False, f=None, ax=None, verbose=True):
@@ -396,8 +397,7 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
             epoch_time = time.time()
             lr_epoch.append(get_lr(optim))
             model.train()
-    #         teacher_forcing_ratio = calc_teacher_forcing_ratio(epoch, config)
-    #         print("Teacher forcing ratio: {:.2f}".format(teacher_forcing_ratio))
+            teacher_forcing_ratio = calc_teacher_forcing_ratio(epoch, config)
             # setup loop with TQDM and dataloader
             if verbose:
                 loop_train = tqdm(train_dataloader, leave=True, position=0)
@@ -409,6 +409,8 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
             losses_clf_train = 0
             losses_gen_train = 0
             acc_clf_train = 0
+            count_results_train = 0
+            count_results_valid = 0
             for i, batch in enumerate(loop_train):
                 # initialize calculated gradients (from prev step)
                 if i % config.accum_grad == 0 or i == 0:
@@ -510,7 +512,26 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                 latents, orig_shape = _to_sequence2(latents)
                 
                 if not config.classify:
-                    outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
+                    if teacher_forcing_ratio >= 1:
+                        outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
+                    else:
+                        # First pass - Get predictions with full ground truth
+                        with torch.no_grad():
+                            outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
+
+                        # Generate teacher forcing mask
+                        rand_gold_pos = torch.rand(*latents.shape) <= teacher_forcing_ratio
+                        
+                        # Clone latents before modifying
+                        latents_new = latents.clone()
+
+                        # Replace sampled positions with predicted values
+                        predicted_tokens = torch.multinomial(outputs.softmax(-1).reshape(-1, outputs.size(-1)), 1)  # Get token predictions
+                        predicted_tokens = predicted_tokens.reshape(*latents.shape).to(latents.dtype)
+                        latents_new[~rand_gold_pos] = predicted_tokens[~rand_gold_pos]  # Replace only sampled positions
+
+                        # Second pass - Train model with modified latents
+                        outputs = model(latents_new, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
                     loss = loss_fn(outputs.view(-1, outputs.size(-1)), 
                                 latents.reshape(-1).long())
                     if config.flip_train:
@@ -553,6 +574,7 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                     outputs = vqvae_model.decode(outputs).squeeze(1)
     #                 outputs = _to_sequence(outputs, inv=True, orig_shape=orig_shape)
                     if config.dataset_type in ["fld2", "syn2"]:
+                        denormalize = train_dataloader.dataset.denormalize
                         selected_outputs = train_dataloader.dataset.denormalize({**batch['input'], 'tensor': outputs})
                         selected_labels = train_dataloader.dataset.denormalize({**batch['input'], 'tensor': labels})
                         selected_outputs = selected_outputs.unsqueeze(1)
@@ -570,6 +592,24 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                     if config.classify:
                         clf_logits = clf_logits.argmax(-1)
                         acc_clf_train += (clf_logits == cls).sum().item() / len(cls)
+                    if config.n_eval_samples > 0 and count_results_train < config.n_eval_total and ((epoch + 1) % config.n_eval_epoch == 0 or epoch == 0):
+                        preds, pred_cls = sample(model, latents[:config.latent_dim[1], :], config.max_length - config.latent_dim[1], config, cls, 
+                                                 well_pos, latents_well, dips, latents_refl, dip_well, latents_init, n_samples=config.n_eval_samples)
+                        preds = _to_sequence2(preds, inv=True, orig_shape=orig_shape)  
+                        preds = vqvae_model.decode(preds).squeeze(1)
+                        preds = preds.reshape(-1, config.n_eval_samples, *preds.shape[-2:])                   
+                        selected_preds = torch.stack([denormalize({**batch['input'], 'tensor': x}) for x in preds.transpose(0, 1)], dim=1)
+                        results_train_ = evaluate_generated_models(torch.cat((selected_labels, selected_preds, selected_labels), dim=1), 
+                                                                  velocity_threshold=75, 
+                                                                  spatial_weight=5,
+                                                                  prefix="train_", 
+                                                                  eval_n_layers=False)
+                        if count_results_train == 0:
+                            results_train = results_train_
+                        else:
+                            results_train = {key: val1+val2 for (key, val1), val2 in zip(results_train.items(), results_train_.values()) if isinstance(val1, float)}
+                        
+                        count_results_train += len(selected_preds)
                 if verbose:
                     loop_train.set_description(f'Epoch {epoch}')
                     loop_train.set_postfix(loss=loss.item())
@@ -686,7 +726,26 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                     latents, orig_shape = _to_sequence2(latents)
 
                     if not config.classify:
-                        outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
+                        if teacher_forcing_ratio >= 1:
+                            outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
+                        else:
+                            # First pass - Get predictions with full ground truth
+                            with torch.no_grad():
+                                outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
+
+                            # Generate teacher forcing mask
+                            rand_gold_pos = torch.rand(*latents.shape) <= teacher_forcing_ratio
+                            
+                            # Clone latents before modifying
+                            latents_new = latents.clone()
+
+                            # Replace sampled positions with predicted values
+                            predicted_tokens = torch.multinomial(outputs.softmax(-1).reshape(-1, outputs.size(-1)), 1)  # Get token predictions
+                            predicted_tokens = predicted_tokens.reshape(*latents.shape).to(latents.dtype)
+                            latents_new[~rand_gold_pos] = predicted_tokens[~rand_gold_pos]  # Replace only sampled positions
+
+                            # Second pass - Train model with modified latents
+                            outputs = model(latents_new, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
                         loss = loss_fn(outputs.view(-1, outputs.size(-1)), 
                                     latents.reshape(-1).long())
                         if config.flip_train:
@@ -737,6 +796,24 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                     if config.classify:
                         clf_logits = clf_logits.argmax(-1)
                         acc_clf_valid += (clf_logits == cls).sum().item() / len(cls)
+                    if config.n_eval_samples > 0 and count_results_valid < config.n_eval_total and ((epoch + 1) % config.n_eval_epoch == 0 or epoch == 0):
+                        preds, pred_cls = sample(model, latents[:config.latent_dim[1], :], config.max_length - config.latent_dim[1], config, cls, 
+                                                 well_pos, latents_well, dips, latents_refl, dip_well, latents_init, n_samples=config.n_eval_samples)
+                        preds = _to_sequence2(preds, inv=True, orig_shape=orig_shape)  
+                        preds = vqvae_model.decode(preds).squeeze(1)
+                        preds = preds.reshape(-1, config.n_eval_samples, *preds.shape[-2:])                   
+                        selected_preds = torch.stack([denormalize({**batch['input'], 'tensor': x}) for x in preds.transpose(0, 1)], dim=1)
+                        results_valid_ = evaluate_generated_models(torch.cat((selected_labels, selected_preds, selected_labels), dim=1), 
+                                                                  velocity_threshold=75, 
+                                                                  spatial_weight=5,
+                                                                  prefix="valid_", 
+                                                                  eval_n_layers=False)
+                        if count_results_valid == 0:
+                            results_valid = results_valid_
+                        else:
+                            results_valid = {key: val1+val2 for (key, val1), val2 in zip(results_valid.items(), results_valid_.values()) if isinstance(val1, float)}
+                        
+                        count_results_valid += len(selected_preds)
                     if verbose:
                         loop_valid.set_description(f'Validation {epoch}')
                         loop_valid.set_postfix(loss=loss.item())
@@ -782,7 +859,7 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                 print("---------------------------------------")
             
             if config.wandb_log:
-                wandb.log({"avg_train_loss": avg_train_loss[-1], 
+                log_all = {"avg_train_loss": avg_train_loss[-1], 
                         "avg_valid_loss": avg_valid_loss[-1], 
                         "avg_train_psnr": avg_train_psnr[-1], 
                         "avg_valid_psnr": avg_valid_psnr[-1], 
@@ -797,7 +874,14 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                         "avg_train_gen_loss": avg_train_gen_loss[-1], 
                         "avg_valid_gen_loss": avg_valid_gen_loss[-1], 
                         "avg_train_clf_acc": avg_train_clf_acc[-1], 
-                        "avg_valid_clf_acc": avg_valid_clf_acc[-1]})
+                        "avg_valid_clf_acc": avg_valid_clf_acc[-1],
+                        "teacher_forcing_ratio": teacher_forcing_ratio}
+                if config.n_eval_samples > 0 and ((epoch + 1) % config.n_eval_epoch == 0 or epoch == 0):
+                    results_train = {key: val / np.ceil(count_results_train / config.batch_size) for key, val in results_train.items()}
+                    results_valid = {key: val / np.ceil(count_results_valid / config.batch_size) for key, val in results_valid.items()}
+                    log_all.update(results_train)
+                    log_all.update(results_valid)
+                wandb.log(log_all)
             
             if plot:
                 ax.cla()
@@ -815,7 +899,7 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                 if early_stopping.early_stop:
                     print("Early stopping")
                     if config.wandb_log:
-                        wandb.log({"avg_train_loss": avg_train_loss[epoch-config.patience], 
+                        log_all = {"avg_train_loss": avg_train_loss[epoch-config.patience], 
                                 "avg_valid_loss": avg_valid_loss[epoch-config.patience], 
                                 "avg_train_psnr": avg_train_psnr[epoch-config.patience], 
                                 "avg_valid_psnr": avg_valid_psnr[epoch-config.patience], 
@@ -826,7 +910,11 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                                 "avg_train_gen_loss": avg_train_gen_loss[epoch-config.patience], 
                                 "avg_valid_gen_loss": avg_valid_gen_loss[epoch-config.patience], 
                                 "avg_train_clf_acc": avg_train_clf_acc[epoch-config.patience], 
-                                "avg_valid_clf_acc": avg_valid_clf_acc[epoch-config.patience]})
+                                "avg_valid_clf_acc": avg_valid_clf_acc[epoch-config.patience]}
+                        if config.n_eval_samples > 0:
+                            log_all.update(results_train)
+                            log_all.update(results_valid)
+                        wandb.log(log_all)
                     break
         
         if config.patience is not None:

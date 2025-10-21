@@ -12,6 +12,10 @@ import dill
 from typing import OrderedDict
 import wandb
 import warnings
+import math
+from pytorch_msssim import ssim
+from sklearn.cluster import DBSCAN
+from concurrent.futures import ProcessPoolExecutor
 
 def setup(config):
     set_seed(config.seed)
@@ -280,3 +284,151 @@ def get_previous_epoch_count(config):
             
     print("Could not determine previous epoch count. Starting from epoch 0.")
     return 0
+
+def calc_teacher_forcing_ratio(epoch, config):
+    
+    if config.sampling_type == "teacher_forcing":
+        return 1.0
+    elif config.sampling_type == "scheduled":  # scheduled sampling
+        if config.scheduled_sampling_decay == "exp":
+            scheduled_ratio = config.scheduled_sampling_k ** epoch
+        elif config.scheduled_sampling_decay == "sigmoid":
+            if epoch / config.scheduled_sampling_k > 700:
+                scheduled_ratio = 0
+            else:
+                scheduled_ratio = config.scheduled_sampling_k / (
+                        config.scheduled_sampling_k
+                        + math.exp(epoch / config.scheduled_sampling_k)
+                        )
+        else:  # linear 
+            scheduled_ratio = config.scheduled_sampling_k - \
+                                config.scheduled_sampling_c * epoch
+        scheduled_ratio = max(config.scheduled_sampling_limit, scheduled_ratio)
+        return scheduled_ratio
+    else:  # always sample from the model predictions
+        return 0.0
+    
+def count_layers_with_clustering(velocity_model, velocity_threshold=1e-3, spatial_weight=1.0):
+    """
+    Count the number of continuous layers in a velocity model using clustering.
+
+    Args:
+        velocity_model (np.ndarray): 2D array of shape (nz, nx) representing the velocity model.
+        velocity_threshold (float): Threshold for velocity similarity.
+        spatial_weight (float): Weight to balance the contribution of spatial continuity.
+
+    Returns:
+        int: Number of detected continuous layers.
+    """
+    nz, nx = velocity_model.shape
+
+    # Flatten the model and create spatial coordinates
+    velocities = velocity_model.flatten()  # Already NumPy array, no need for .numpy()
+    z_coords, x_coords = np.meshgrid(np.arange(nz), np.arange(nx), indexing="ij")
+    z_coords, x_coords = z_coords.flatten(), x_coords.flatten()
+
+    # Scale spatial coordinates to balance with velocity
+    z_coords = z_coords * spatial_weight
+    x_coords = x_coords * spatial_weight
+
+    # Combine velocity and spatial coordinates into a single feature space
+    features = np.stack([velocities, z_coords, x_coords], axis=1)
+
+    # Apply DBSCAN clustering
+    dbscan = DBSCAN(eps=velocity_threshold, min_samples=1, metric="euclidean")
+    labels = dbscan.fit_predict(features)
+
+    # Count the unique clusters (layers)
+    num_layers = len(np.unique(labels))
+    return num_layers
+
+
+def batch_count_layers(samples, velocity_threshold, spatial_weight):
+    """
+    Count layers for multiple samples in parallel while maintaining order.
+
+    Args:
+        samples (torch.Tensor): Batch of velocity models (PyTorch tensors).
+        velocity_threshold (float): Clustering velocity threshold.
+        spatial_weight (float): Clustering spatial weight.
+
+    Returns:
+        list: Layer counts for each sample (ordered by input index).
+    """
+    # Ensure the samples are in NumPy format for compatibility with multiprocessing
+    samples = [sample.cpu().numpy() for sample in samples]  # Explicit conversion from PyTorch tensors
+
+    with ProcessPoolExecutor() as executor:
+        # Use enumerate to keep track of indices for ordering
+        futures = [
+            executor.submit(count_layers_with_clustering, sample, velocity_threshold, spatial_weight)
+            for sample in samples
+        ]
+
+        # Collect results in order of submission
+        results = [future.result() for future in futures]
+
+    return results
+    
+def evaluate_generated_models(velocity_models, eval_n_layers=True, velocity_threshold=1e-3, spatial_weight=1.0, prefix=""):
+    """
+    Evaluate generated velocity models against the ground truth using clustering for layer detection.
+
+    Args:
+        velocity_models (torch.Tensor): Tensor of shape (num_samples, num_models+2, nx, nz).
+                                        The first index is the input, the last index is the ground truth,
+                                        and the remaining indices are the generated samples.
+        velocity_threshold (float): The threshold for velocity similarity in layer detection.
+        spatial_weight (float): The weight to balance spatial continuity in clustering.
+
+    Returns:
+        dict: A dictionary containing RMSE, MAE, SSIM, and layer similarity metrics.
+    """
+    # Extract the generated samples and ground truth
+    generated_samples = velocity_models[:, 1:-1, :, :]  # Exclude input and ground truth
+    ground_truth = velocity_models[:, -1, :, :]  # Ground truth is the last index
+
+    # Calculate RMSE
+    rmse = torch.sqrt(((generated_samples - ground_truth.unsqueeze(1)) ** 2).mean(dim=(2, 3))).mean(dim=(0, 1))
+
+    # Calculate MAE
+    mae = (generated_samples - ground_truth.unsqueeze(1)).abs().mean(dim=(2, 3)).mean(dim=(0, 1))
+
+    # Calculate SSIM
+    ssim_values = []
+    for i in range(generated_samples.shape[1]):  # Loop over generated models
+        ssim_vals = [ssim(gen[None, None, ...], gt[None, None, ...], data_range=4500.0)
+                     for gen, gt in zip(generated_samples[:, i, :, :], ground_truth)]
+        ssim_values.append(torch.stack(ssim_vals).mean())
+    avg_ssim = torch.tensor(ssim_values).mean()
+
+    # Layer counting using clustering
+    if eval_n_layers:
+        flattened_generated = generated_samples.reshape(-1, *generated_samples.shape[2:])
+        flattened_ground_truth = ground_truth
+
+        generated_layers = torch.tensor(
+            batch_count_layers(flattened_generated, velocity_threshold, spatial_weight)
+        ).reshape(generated_samples.shape[:2])
+
+        ground_truth_layers = torch.tensor(
+            batch_count_layers(flattened_ground_truth, velocity_threshold, spatial_weight)
+        )
+
+        # Calculate average absolute layer difference
+        layer_diff = (generated_layers - ground_truth_layers.unsqueeze(1)).abs().float().mean()
+    else:
+        layer_diff = torch.tensor(0)
+        generated_layers = torch.tensor(0)
+        ground_truth_layers = torch.tensor(0)
+
+    # Prepare the results
+    results = {
+        prefix+"RMSE": rmse.item(),
+        prefix+"MAE": mae.item(),
+        prefix+"SSIM": avg_ssim.item(),
+        prefix+"Layer Difference": layer_diff.item(),
+        prefix+"Generated Layers": generated_layers,
+        prefix+"Ground Truth Layers": ground_truth_layers
+    }
+    return results

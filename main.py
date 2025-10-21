@@ -183,6 +183,9 @@ def parse_args():
     parser.add_argument('--vqvae_refl_dir', type=None, default=None)
     parser.add_argument('--anti_aliasing', action='store_true')
     parser.add_argument('--order', type=int, default=0)
+    parser.add_argument('--n_eval_samples', type=int, default=0)
+    parser.add_argument('--n_eval_total', type=int, default=0)
+    parser.add_argument('--n_eval_epoch', type=int, default=1)
 
     # WandB parameters
     parser.add_argument('--wandb_log', action='store_true')

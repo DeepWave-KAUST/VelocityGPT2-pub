@@ -32,9 +32,23 @@ from .utils import *
 from .utils import _to_sequence2
 from .datasets import *
 
-def sample(model, context, length, config, cls=None, well_pos=None, well_token=None, dip=None, refl=None, dip_well=None, init=None):
-    outputs = context.to(config.device) # add batch so shape [seq len, batch]
+def sample(model, context, length, config, cls=None, well_pos=None, well_token=None, dip=None, refl=None, dip_well=None, init=None, n_samples=1):
+    outputs = context.repeat_interleave(n_samples, dim=-1).to(config.device) # add batch so shape [seq len, batch]
     pad = torch.zeros(config.n_concat_token, outputs.shape[-1], dtype=torch.long).to(config.device)  # to pad prev output
+    if cls is not None:
+        cls = cls.repeat_interleave(n_samples, dim=0).to(config.device)
+    if well_pos is not None:
+        well_pos = well_pos.repeat_interleave(n_samples, dim=0).to(config.device)
+    if well_token is not None:
+        well_token = well_token.repeat_interleave(n_samples, dim=1).to(config.device)
+    if dip is not None:
+        dip = dip.repeat_interleave(n_samples, dim=0).to(config.device)
+    if refl is not None:
+        refl = refl.repeat_interleave(n_samples, dim=1).to(config.device)
+    if dip_well is not None:
+        dip_well = dip_well.repeat_interleave(n_samples, dim=0).to(config.device)
+    if init is not None:
+        init = init.repeat_interleave(n_samples, dim=1).to(config.device)
     with torch.no_grad():
         for l in range(length):
             if dip is not None:
@@ -52,13 +66,14 @@ def sample(model, context, length, config, cls=None, well_pos=None, well_token=N
                 logits = model(torch.cat((outputs, pad), dim=0), cls, well_pos, well_token, d, r, dip_well, init)
             else:
                 clf_logits, logits = model(torch.cat((outputs, pad), dim=0), cls, well_pos, well_token, d, r, dip_well, init)
-            logits = logits[-config.n_concat_token:, :, :]# / 1
+            logits = logits[-1, :, :]# / 1
             probs = F.softmax(logits, dim=-1)
-            pred = []
-            for i in range(probs.shape[1]):
-                for j in range(probs.shape[0]):
-                    pred.append(torch.multinomial(probs[j, i], num_samples=1))
-            pred = torch.tensor(pred).reshape(probs.shape[1], probs.shape[0]).transpose(0, 1)
+            # pred = []
+            # for i in range(probs.shape[1]):
+            #     for j in range(probs.shape[0]):
+            #         pred.append(torch.multinomial(probs[j, i], num_samples=1))
+            # pred = torch.tensor(pred).reshape(probs.shape[1], probs.shape[0]).transpose(0, 1)
+            pred = torch.multinomial(probs, num_samples=1).transpose(1, 0)
             outputs = torch.cat((outputs, pred.to(config.device)), dim=0)
             
         if config.classify:

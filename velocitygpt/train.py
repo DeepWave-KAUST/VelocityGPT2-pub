@@ -913,18 +913,18 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                 if early_stopping.early_stop or (config.epoch_lim is not None and epoch == config.epoch_lim - 1):
                     print("Early stopping")
                     if config.wandb_log:
-                        log_all = {"avg_train_loss": avg_train_loss[epoch-config.patience], 
-                                "avg_valid_loss": avg_valid_loss[epoch-config.patience], 
-                                "avg_train_psnr": avg_train_psnr[epoch-config.patience], 
-                                "avg_valid_psnr": avg_valid_psnr[epoch-config.patience], 
-                                "avg_train_ssim": avg_train_ssim[epoch-config.patience], 
-                                "avg_valid_ssim": avg_valid_ssim[epoch-config.patience], 
-                                "avg_train_clf_loss": avg_train_clf_loss[epoch-config.patience], 
-                                "avg_valid_clf_loss": avg_valid_clf_loss[epoch-config.patience], 
-                                "avg_train_gen_loss": avg_train_gen_loss[epoch-config.patience], 
-                                "avg_valid_gen_loss": avg_valid_gen_loss[epoch-config.patience], 
-                                "avg_train_clf_acc": avg_train_clf_acc[epoch-config.patience], 
-                                "avg_valid_clf_acc": avg_valid_clf_acc[epoch-config.patience]}
+                        log_all = {"avg_train_loss": avg_train_loss[epoch-patience], 
+                                "avg_valid_loss": avg_valid_loss[epoch-patience], 
+                                "avg_train_psnr": avg_train_psnr[epoch-patience], 
+                                "avg_valid_psnr": avg_valid_psnr[epoch-patience], 
+                                "avg_train_ssim": avg_train_ssim[epoch-patience], 
+                                "avg_valid_ssim": avg_valid_ssim[epoch-patience], 
+                                "avg_train_clf_loss": avg_train_clf_loss[epoch-patience], 
+                                "avg_valid_clf_loss": avg_valid_clf_loss[epoch-patience], 
+                                "avg_train_gen_loss": avg_train_gen_loss[epoch-patience], 
+                                "avg_valid_gen_loss": avg_valid_gen_loss[epoch-patience], 
+                                "avg_train_clf_acc": avg_train_clf_acc[epoch-patience], 
+                                "avg_valid_clf_acc": avg_valid_clf_acc[epoch-patience]}
                         if config.n_eval_samples > 0:
                             log_all.update(results_train)
                             log_all.update(results_valid)

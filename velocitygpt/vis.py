@@ -83,6 +83,121 @@ def sample(model, context, length, config, cls=None, well_pos=None, well_token=N
             
     return outputs, pred_cls
 
+def sample_next_token(logits, top_k):
+    logits = logits[-1, :, :]  # Shape: [1, batch, vocab_size]
+    probs = F.softmax(logits, dim=-1)
+
+    # Apply top-k filtering
+    if top_k is not None:
+        # Sort the probabilities
+        top_k_probs, top_k_indices = torch.topk(probs, top_k, dim=-1)
+
+        # Set non-top-k probabilities to 0
+        filtered_probs = torch.zeros_like(probs).scatter_(-1, top_k_indices, top_k_probs)
+        filtered_probs /= filtered_probs.sum(dim=-1, keepdim=True)  # Renormalize
+
+    else:
+        filtered_probs = probs
+
+    pred = torch.multinomial(filtered_probs, num_samples=1).transpose(1, 0)
+
+    return pred
+    
+def sample3(model, context, length, config, cls=None, well_pos=None, well_token=None, dip=None, refl=None, dip_well=None, init=None, top_k=None, n_samples=1):
+    outputs = context.repeat_interleave(n_samples, dim=-1).to(config.device)  # Add batch so shape [seq len, batch]
+    pad = torch.zeros(1, outputs.shape[-1], dtype=torch.long).to(config.device)  # To pad prev output
+    cond_length = config.max_position_embeddings - config.max_length
+    if cls is not None:
+        cls = cls.repeat_interleave(n_samples, dim=0).to(config.device)
+    if well_pos is not None:
+        well_pos = well_pos.repeat_interleave(n_samples, dim=0).to(config.device)
+    if well_token is not None:
+        well_token = well_token.repeat_interleave(n_samples, dim=1).to(config.device)
+    if dip is not None:
+        dip = dip.repeat_interleave(n_samples, dim=0).to(config.device)
+    if refl is not None:
+        refl = refl.repeat_interleave(n_samples, dim=1).to(config.device)
+    if dip_well is not None:
+        dip_well = dip_well.repeat_interleave(n_samples, dim=0).to(config.device)
+    if init is not None:
+        init = init.repeat_interleave(n_samples, dim=1).to(config.device)
+    
+    with torch.device(config.device):
+        for layer in model.layers:
+            layer.enable_kv_cache(batch_size=outputs.shape[-1])
+
+    # Pre-fill attention mask
+    if config.attn_type == "default":
+        attn_mask = torch.full(
+            (config.max_position_embeddings, config.max_position_embeddings), -float("Inf"), device=outputs.device,
+        )
+        attn_mask = torch.triu(attn_mask, diagonal=1)
+        if config.unmask_condition:
+            attn_mask[:cond_length, :cond_length] = 0
+    else:
+        raise NotImplementedError("Attention mask for {} with KV caching is not implemented".format(config.attn_type))
+
+    # Pre-fill positions for positional embeddings
+    input_pos = torch.arange(config.max_position_embeddings, device=config.device).unsqueeze(-1)
+
+    with torch.no_grad():
+        # Compute initial logits to register KV cache
+        if dip is not None:
+            d = dip[:, :-(length-1)]
+        else:
+            d = None
+        if refl is not None:
+            if config.prepend_refl:
+                r = refl
+            else:
+                r = refl[:-(length-1)]
+        else:
+            r = None
+
+        if not config.classify:
+            logits = model(torch.cat((outputs, pad), dim=0), cls, well_pos, well_token, d, r, dip_well, init,
+                           input_pos=input_pos[:cond_length + len(outputs) + 1],
+                           attn_mask=attn_mask[:cond_length + len(outputs) + 1, :])
+        else:
+            raise NotImplementedError
+
+        pred = sample_next_token(logits, top_k)
+        outputs = torch.cat((outputs, pred), dim=0)
+
+        # Continue generating tokens
+        for i in range(length - 1):
+            if dip is not None:
+                d = dip[:, [-(length-i-1)]]
+            else:
+                d = None
+            if refl is not None:
+                if config.prepend_refl:
+                    r = None
+                else:
+                    r = refl[[-(length-i-1)]]
+            else:
+                r = None
+
+            if not config.classify:
+                logits = model(pred, None, None, None, d, r, None, None,
+                               input_pos=input_pos[[cond_length + len(outputs)]],
+                               attn_mask=attn_mask[[cond_length + len(outputs)], :])
+            else:
+                raise NotImplementedError
+            
+            pred = sample_next_token(logits, top_k)
+            outputs = torch.cat((outputs, pred), dim=0)
+            
+        if config.classify:
+            pred_cls = None
+        else:
+            pred_cls = 0
+
+    for layer in model.layers:
+        layer.disable_kv_cache()
+            
+    return outputs, pred_cls
+
 def plot_example(vqvae_model, vqvae_refl_model, model, data, scaler1, pad, config, idx, idx_gen=[1], cls=None, 
                  well_pos=None, dip=None, scaler=1, log=False, prefix=0):
     device = config.device

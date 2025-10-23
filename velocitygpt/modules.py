@@ -803,15 +803,26 @@ class Block(nn.Module):
         self.num_heads = num_heads
         self.cond_length = config.max_position_embeddings - config.max_length
         self.unmask_condition = config.unmask_condition
+        self.max_position_embeddings = config.max_position_embeddings
 
-    def forward(self, x, pos=None):
+    def enable_kv_cache(self, batch_size=None):
+        batch_size = batch_size if batch_size is not None else self.batch_size
+        self.attn.setup_cache(batch_size, self.attn.q_proj.weight.dtype, self.max_position_embeddings)
+
+    def disable_kv_cache(self):
+        if hasattr(self.attn, 'kv_cache') and self.attn.kv_cache is not None:
+            self.attn.kv_cache = None
+            self.attn.cache_enabled = False
+
+    def forward(self, x, pos=None, attn_mask=None):
         if self.attn_type == "default":
-            attn_mask = torch.full(
-                (len(x), len(x)), -float("Inf"), device=x.device, dtype=x.dtype
-            )
-            attn_mask = torch.triu(attn_mask, diagonal=1)
-            if self.unmask_condition:
-                attn_mask[:self.cond_length, :self.cond_length] = 0
+            if attn_mask is None:
+                attn_mask = torch.full(
+                    (len(x), len(x)), -float("Inf"), device=x.device, dtype=x.dtype
+                )
+                attn_mask = torch.triu(attn_mask, diagonal=1)
+                if self.unmask_condition:
+                    attn_mask[:self.cond_length, :self.cond_length] = 0
         elif self.attn_type == "linear":
             attn_mask = TriangularCausalMask(len(x), device=x.device)
         

@@ -76,7 +76,7 @@ class GPT2(nn.Module):
         self.broadcast_glob_pos = config.broadcast_glob_pos
         self.adaln_glob_pos = config.adaln_glob_pos
     
-    def forward(self, x, cls=None, well_pos=None, well_token=None, dip=None, refl=None, dip_well=None, init=None):
+    def forward(self, x, cls=None, well_pos=None, well_token=None, dip=None, refl=None, dip_well=None, init=None, input_pos=None, attn_mask=None):
         length, batch = x.shape
         
         h = self.token_embeddings(x)
@@ -94,10 +94,10 @@ class GPT2(nn.Module):
         # prepend sos/cls token
         if not self.cls_token:
             sos = torch.ones(1, batch, self.hidden_size, device=x.device) * self.sos
-            h = torch.cat([sos, h[:-1, :, :]], axis=0)
+            h = torch.cat([sos, h[:-1, :, :]], axis=0) if len(h) > 2 else h # For KV caching support
         elif self.cls_token and cls is not None:
             cls = self.cls_token_embeddings(cls).unsqueeze(0)
-            h = torch.cat([cls, h[:-1, :, :]], axis=0)
+            h = torch.cat([cls, h[:-1, :, :]], axis=0) if len(h) > 2 else h # For KV caching support
             
         if self.use_dip and dip is not None:
             use_dip_embed = torch.ones(dip.shape[0], device=h.device).long()
@@ -105,7 +105,7 @@ class GPT2(nn.Module):
             use_dip_embed = self.use_dip_embeddings(use_dip_embed).unsqueeze(0)
             dip_embed = self.dip_embeddings(dip).transpose(0, 1)
             h += dip_embed
-            h = torch.cat([use_dip_embed, h], axis=0)
+            h = torch.cat([use_dip_embed, h], axis=0) if len(h) > 2 else h # For KV caching support
             
         if self.vqvae_refl_dir is not None and refl is not None:
             use_refl_embed = torch.ones(refl.shape[1], device=h.device).long()
@@ -140,18 +140,18 @@ class GPT2(nn.Module):
         if not self.add_pos_first and self.position_embedding_type == "learnable":
             # add positional embeddings
             if self.well_cond_prob > 0 or self.use_dip or self.vqvae_refl_dir is not None:
-                positions = torch.arange(len(h)//self.n_concat_token, device=x.device).unsqueeze(-1)
+                positions = torch.arange(len(h)//self.n_concat_token, device=x.device).unsqueeze(-1) if input_pos is None else input_pos
             else:
-                positions = torch.arange(length//self.n_concat_token, device=x.device).unsqueeze(-1)
+                positions = torch.arange(length//self.n_concat_token, device=x.device).unsqueeze(-1) if input_pos is None else input_pos
             h = h + self.position_embeddings(positions).expand_as(h)
             
         if self.double_pos and not self.position_embedding_type == "learnable":
-            positions = torch.arange(length//self.n_concat_token, device=x.device).unsqueeze(-1)
+            positions = torch.arange(length//self.n_concat_token, device=x.device).unsqueeze(-1) if input_pos is None else input_pos
             h = h + self.position_embeddings2(positions).expand_as(h)
 
         # transformer
         for layer in self.layers:
-            h = layer(h, pos=dip_embed if self.adaln_glob_pos else None)
+            h = layer(h, pos=dip_embed if self.adaln_glob_pos else None, attn_mask=attn_mask)
 
         h = self.ln_f(h)
         
@@ -164,7 +164,7 @@ class GPT2(nn.Module):
         logits = self.head(h)
         
         if self.use_dip and dip is not None:
-            logits = logits[1:]
+            logits = logits[1:] if len(logits) >= 2 else logits # For KV caching support
             
         if self.vqvae_refl_dir is not None and refl is not None:
             logits = logits[1:]

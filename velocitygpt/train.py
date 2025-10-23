@@ -32,7 +32,7 @@ from .pytorchtools import EarlyStopping
 from .utils import *
 from .utils import _to_sequence2
 from .quantizer import FSQ
-from .vis import sample
+from .vis import sample, sample3
 
 def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_dataloader, scaler1, config, 
                plot=False, f=None, ax=None, verbose=True):
@@ -364,11 +364,17 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
         optim.load_state_dict(torch.load(checkpoint)['optim'])
         if scheduler is not None:
             scheduler.load_state_dict(torch.load(checkpoint)['scheduler'])
+
+        # Make sure KV cache is disabled properly
+        for layer in model.layers:
+            if hasattr(layer, 'disable_kv_cache'):
+                layer.disable_kv_cache()
         
     return model, avg_train_loss, avg_valid_loss, time_per_epoch
 
 def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, loss_fn, train_dataloader, 
                test_dataloader, scaler1, config, plot=False, f=None, ax=None, verbose=True):
+    sample_fn = sample3 if config.attn_type == "default" else sample
     epochs = config.epoch
     device = config.device
     total_time = time.time()
@@ -593,7 +599,7 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                         clf_logits = clf_logits.argmax(-1)
                         acc_clf_train += (clf_logits == cls).sum().item() / len(cls)
                     if config.n_eval_samples > 0 and count_results_train < config.n_eval_total and ((epoch + 1) % config.n_eval_epoch == 0 or epoch == 0):
-                        preds, pred_cls = sample(model, latents[:config.latent_dim[1], :], config.max_length - config.latent_dim[1], config, cls, 
+                        preds, pred_cls = sample_fn(model, latents[:config.latent_dim[1], :], config.max_length - config.latent_dim[1], config, cls, 
                                                  well_pos, latents_well, dips, latents_refl, dip_well, latents_init, n_samples=config.n_eval_samples)
                         preds = _to_sequence2(preds, inv=True, orig_shape=orig_shape)  
                         preds = vqvae_model.decode(preds).squeeze(1)
@@ -797,7 +803,7 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                         clf_logits = clf_logits.argmax(-1)
                         acc_clf_valid += (clf_logits == cls).sum().item() / len(cls)
                     if config.n_eval_samples > 0 and count_results_valid < config.n_eval_total and ((epoch + 1) % config.n_eval_epoch == 0 or epoch == 0):
-                        preds, pred_cls = sample(model, latents[:config.latent_dim[1], :], config.max_length - config.latent_dim[1], config, cls, 
+                        preds, pred_cls = sample_fn(model, latents[:config.latent_dim[1], :], config.max_length - config.latent_dim[1], config, cls, 
                                                  well_pos, latents_well, dips, latents_refl, dip_well, latents_init, n_samples=config.n_eval_samples)
                         preds = _to_sequence2(preds, inv=True, orig_shape=orig_shape)  
                         preds = vqvae_model.decode(preds).squeeze(1)

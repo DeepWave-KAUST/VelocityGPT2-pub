@@ -902,7 +902,15 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
             if config.patience is not None:
                 early_stopping(avg_valid_loss[-1], model, optim=optim, scheduler=scheduler)
 
-                if early_stopping.early_stop:
+            if config.patience is not None:
+                if config.epoch_lim is not None:
+                    early_stopping(1e12-epoch, model, optim=optim, scheduler=scheduler)
+                    patience = 1
+                else:
+                    early_stopping(avg_valid_loss[-1], model, optim=optim, scheduler=scheduler)
+                    patience = config.patience
+
+                if early_stopping.early_stop or (config.epoch_lim is not None and epoch == config.epoch_lim - 1):
                     print("Early stopping")
                     if config.wandb_log:
                         log_all = {"avg_train_loss": avg_train_loss[epoch-config.patience], 

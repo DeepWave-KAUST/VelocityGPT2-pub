@@ -137,6 +137,7 @@ def parse_args():
     parser.add_argument('--optim', type=str, default='adam')
     parser.add_argument('--scheduler', type=str, default='none')
     parser.add_argument('--epoch', type=int, default=1000)
+     parser.add_argument('--epoch_lim', type=int, default=None)
     parser.add_argument('--batch_size', type=int, default=1024)
     parser.add_argument('--warmup', type=str, default='none')
     parser.add_argument('--warmup_period', type=int, default=20)

@@ -315,6 +315,9 @@ def build_model(config):
                     device=config.device))
     else:
         model = GPT2(config)
+        if config.pretrained_model_dir is not None:
+            m = model.load_state_dict(load_from_pt_or_checkpoint(config.pretrained_model_dir, "model"), strict=False)
+        print("Loaded pretrained model. Message:", m)
         if config.cont_dir is not None:
             model.load_state_dict(load_from_pt_or_checkpoint(config.cont_dir, "model"))
         print(model)

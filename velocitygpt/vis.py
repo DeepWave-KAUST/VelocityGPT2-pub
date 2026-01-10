@@ -134,6 +134,8 @@ def sample3(model, context, length, config, cls=None, well_pos=None, well_token=
         attn_mask = torch.triu(attn_mask, diagonal=1)
         if config.unmask_condition:
             attn_mask[:cond_length, :cond_length] = 0
+    elif config.attn_type == "linear":
+        attn_mask = None
     else:
         raise NotImplementedError("Attention mask for {} with KV caching is not implemented".format(config.attn_type))
 
@@ -157,7 +159,7 @@ def sample3(model, context, length, config, cls=None, well_pos=None, well_token=
         if not config.classify:
             logits = model(torch.cat((outputs, pad), dim=0), cls, well_pos, well_token, d, r, dip_well, init,
                            input_pos=input_pos[:cond_length + len(outputs) + 1],
-                           attn_mask=attn_mask[:cond_length + len(outputs) + 1, :])
+                           attn_mask=attn_mask[:cond_length + len(outputs) + 1, :] if attn_mask is not None else None)
         else:
             raise NotImplementedError
 
@@ -181,7 +183,7 @@ def sample3(model, context, length, config, cls=None, well_pos=None, well_token=
             if not config.classify:
                 logits = model(pred, None, None, None, d, r, None, None,
                                input_pos=input_pos[[cond_length + len(outputs)]],
-                               attn_mask=attn_mask[[cond_length + len(outputs)], :])
+                               attn_mask=attn_mask[[cond_length + len(outputs)], :] if attn_mask is not None else None)
             else:
                 raise NotImplementedError
             

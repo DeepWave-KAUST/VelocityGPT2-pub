@@ -6,6 +6,7 @@ import distributed as dist_fn
 from torch.autograd import Function
 from fast_transformers.attention import AttentionLayer, CausalLinearAttention
 from fast_transformers.masking import TriangularCausalMask, LengthMask
+from fast_transformers.recurrent.attention import RecurrentLinearAttention
 from linear_attention_transformer.linear_attention_transformer import SelfAttention
 from typing import Optional
 from rotary_embedding_torch import (
@@ -738,6 +739,8 @@ class Block(nn.Module):
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.ln_1 = nn.LayerNorm(embed_dim)
         self.ln_2 = nn.LayerNorm(embed_dim)
+        self.head_dim = embed_dim // num_heads
+        self.recurrent_linear_attn = None
         if config.attn_type == "default":
             self.attn = MultiHeadAttention(
                 embed_dim=embed_dim,
@@ -751,6 +754,7 @@ class Block(nn.Module):
             )
         elif config.attn_type == "linear":
             self.attn = AttentionLayer(CausalLinearAttention(embed_dim), embed_dim, num_heads)
+            self.recurrent_linear_attn = RecurrentLinearAttention(embed_dim // num_heads)
         elif config.attn_type == "linear2":
             self.attn = SelfAttention(embed_dim, num_heads, causal=True)
         else:
@@ -762,6 +766,10 @@ class Block(nn.Module):
         )
 
         self.attn_type = config.attn_type
+        self.linear_cache_enabled = False
+        self.linear_state = None
+        self.linear_cache_batch = None
+        self._linear_qkv_cache = None
         
         def get_slopes(n):
             def get_slopes_power_of_2(n):
@@ -806,13 +814,26 @@ class Block(nn.Module):
         self.max_position_embeddings = config.max_position_embeddings
 
     def enable_kv_cache(self, batch_size=None):
-        batch_size = batch_size if batch_size is not None else self.batch_size
-        self.attn.setup_cache(batch_size, self.attn.q_proj.weight.dtype, self.max_position_embeddings)
+        if self.attn_type == "default":
+            cached_batch = batch_size if batch_size is not None else getattr(self, 'batch_size', None)
+            self.attn.setup_cache(cached_batch, self.attn.q_proj.weight.dtype, self.max_position_embeddings)
+        elif self.attn_type == "linear":
+            self.linear_cache_enabled = True
+            self.linear_state = None
+            self.linear_cache_batch = batch_size
+        else:
+            raise NotImplementedError(f"KV caching is not implemented for attention type {self.attn_type}")
 
     def disable_kv_cache(self):
-        if hasattr(self.attn, 'kv_cache') and self.attn.kv_cache is not None:
-            self.attn.kv_cache = None
-            self.attn.cache_enabled = False
+        if self.attn_type == "default":
+            if hasattr(self.attn, 'kv_cache') and self.attn.kv_cache is not None:
+                self.attn.kv_cache = None
+                self.attn.cache_enabled = False
+        elif self.attn_type == "linear":
+            self.linear_cache_enabled = False
+            self.linear_state = None
+            self.linear_cache_batch = None
+
 
     def forward(self, x, pos=None, attn_mask=None):
         if self.attn_type == "default":
@@ -824,9 +845,12 @@ class Block(nn.Module):
                 if self.unmask_condition:
                     attn_mask[:self.cond_length, :self.cond_length] = 0
         elif self.attn_type == "linear":
-            attn_mask = TriangularCausalMask(len(x), device=x.device)
+            if not self.linear_cache_enabled:
+                attn_mask = TriangularCausalMask(len(x), device=x.device)
+            else:
+                attn_mask = None
         
-        if self.position_embedding_type == "alibi":
+        if self.position_embedding_type == "alibi" and attn_mask is not None:
             maxpos = len(x)
             alibi = self.slopes.unsqueeze(1).unsqueeze(1) * torch.arange(maxpos, device=x.device).unsqueeze(0).unsqueeze(0).expand(self.num_heads, -1, -1)
             alibi = alibi.view(self.num_heads, 1, maxpos)
@@ -844,13 +868,17 @@ class Block(nn.Module):
                     bias=self.bias
                 ).transpose(0, 1)
         elif self.attn_type == "linear":
-            x = x.transpose(0, 1)
-            a = self.attn(x, x, x, 
-                          attn_mask=attn_mask, 
-                          query_lengths=LengthMask(x.new_full((x.shape[0],), x.shape[1], dtype=torch.int64)), 
-                          key_lengths=LengthMask(x.new_full((x.shape[0],), x.shape[1], dtype=torch.int64)))
-            a = a.transpose(0, 1)
-            x = x.transpose(0, 1)
+            if self.linear_cache_enabled:
+                with torch.cuda.amp.autocast(enabled=False):
+                    a = self._linear_attention_cached(x)
+            else:
+                x = x.transpose(0, 1)
+                a = self.attn(x, x, x, 
+                              attn_mask=attn_mask, 
+                              query_lengths=LengthMask(x.new_full((x.shape[0],), x.shape[1], dtype=torch.int64)), 
+                              key_lengths=LengthMask(x.new_full((x.shape[0],), x.shape[1], dtype=torch.int64)))
+                a = a.transpose(0, 1)
+                x = x.transpose(0, 1)
         elif self.attn_type == "linear2":
             a = self.attn(x.transpose(0, 1))
             a = a.transpose(0, 1)
@@ -862,6 +890,106 @@ class Block(nn.Module):
             
         return x
     
+    def _linear_attention_cached(self, x):
+        if self.recurrent_linear_attn is None:
+            raise RuntimeError("Recurrent linear attention is not initialized")
+        batch_first = x.transpose(0, 1)
+        if self.linear_state is None and batch_first.shape[1] > 1:
+            # Prefill outputs with causal linear attention and initialize the recurrent state in batch.
+            attn_mask = TriangularCausalMask(batch_first.shape[1], device=x.device)
+            q_len = LengthMask(
+                batch_first.new_full((batch_first.shape[0],), batch_first.shape[1], dtype=torch.int64)
+            )
+            k_len = LengthMask(
+                batch_first.new_full((batch_first.shape[0],), batch_first.shape[1], dtype=torch.int64)
+            )
+            outputs = self.attn(
+                batch_first,
+                batch_first,
+                batch_first,
+                attn_mask=attn_mask,
+                query_lengths=q_len,
+                key_lengths=k_len,
+            )
+            self._linear_attention_prefill_state(batch_first)
+            return outputs.transpose(0, 1)
+
+        outputs = []
+        for t in range(batch_first.shape[1]):
+            step_output = self._linear_attention_step(batch_first[:, t, :])
+            outputs.append(step_output.unsqueeze(1))
+        return torch.cat(outputs, dim=1).transpose(0, 1)
+        # outputs = self._linear_attention_step(batch_first)
+        # return outputs.transpose(0, 1)
+
+    def _linear_attention_prefill_state(self, batch_first):
+        if self.recurrent_linear_attn is None:
+            raise RuntimeError("Recurrent linear attention is not initialized")
+        batch, seq_len, _ = batch_first.shape
+        _, key, value = self._linear_qkv_projection(batch_first)
+        head_dim = key.shape[-1] // self.num_heads
+        key = key.view(batch, seq_len, self.num_heads, head_dim)
+        value = value.view(batch, seq_len, self.num_heads, head_dim)
+        feature_map = self.recurrent_linear_attn.feature_map
+        feature_map.new_feature_map(batch_first.device)
+        K = feature_map.forward_keys(key)
+        Zi = K.sum(dim=1)
+        Si = torch.einsum("bthd,bthm->bhdm", K, value)
+        self.linear_state = [Si, Zi]
+
+    def _linear_qkv_projection(self, x):
+        q_proj = self.attn.query_projection
+        k_proj = self.attn.key_projection
+        v_proj = self.attn.value_projection
+        if not self.training and not torch.is_grad_enabled():
+            cache = self._linear_qkv_cache
+            qv = q_proj.weight._version
+            kv = k_proj.weight._version
+            vv = v_proj.weight._version
+            qb = None if q_proj.bias is None else q_proj.bias._version
+            kb = None if k_proj.bias is None else k_proj.bias._version
+            vb = None if v_proj.bias is None else v_proj.bias._version
+            if cache is None or cache["device"] != q_proj.weight.device or cache["dtype"] != q_proj.weight.dtype:
+                cache = None
+            if cache is None or cache["versions"] != (qv, kv, vv, qb, kb, vb):
+                weight = torch.cat([q_proj.weight, k_proj.weight, v_proj.weight], dim=0)
+                if q_proj.bias is None:
+                    bias = None
+                else:
+                    bias = torch.cat([q_proj.bias, k_proj.bias, v_proj.bias], dim=0)
+                self._linear_qkv_cache = {
+                    "weight": weight,
+                    "bias": bias,
+                    "device": q_proj.weight.device,
+                    "dtype": q_proj.weight.dtype,
+                    "versions": (qv, kv, vv, qb, kb, vb),
+                }
+            weight = self._linear_qkv_cache["weight"]
+            bias = self._linear_qkv_cache["bias"]
+        else:
+            weight = torch.cat([q_proj.weight, k_proj.weight, v_proj.weight], dim=0)
+            if q_proj.bias is None:
+                bias = None
+            else:
+                bias = torch.cat([q_proj.bias, k_proj.bias, v_proj.bias], dim=0)
+        qkv = F.linear(x, weight, bias)
+        embed_dim = q_proj.weight.shape[0]
+        query, key, value = qkv.split(embed_dim, dim=-1)
+        return query, key, value
+
+    def _linear_attention_step(self, token):
+        query, key, value = self._linear_qkv_projection(token)
+        batch = token.shape[0]
+        head_dim = query.shape[-1] // self.num_heads
+        query = query.view(batch, self.num_heads, head_dim)
+        key = key.view(batch, self.num_heads, head_dim)
+        value = value.view(batch, self.num_heads, head_dim)
+        attn_output, self.linear_state = self.recurrent_linear_attn(
+            query, key, value, state=self.linear_state
+        )
+        attn_output = attn_output.reshape(batch, -1)
+        return self.attn.out_projection(attn_output)
+
 class WDSRBlock(nn.Module):
     def __init__(
         self, n_feats, kernel_size, wn, act=nn.ReLU(True), res_scale=1):

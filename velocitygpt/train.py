@@ -374,7 +374,7 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
 
 def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, loss_fn, train_dataloader, 
                test_dataloader, scaler1, config, plot=False, f=None, ax=None, verbose=True):
-    sample_fn = sample3 if config.attn_type == "default" else sample
+    sample_fn = sample3 if config.attn_type in ["default", "linear"] else sample
     epochs = config.epoch
     device = config.device
     total_time = time.time()
@@ -518,19 +518,20 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                 latents, orig_shape = _to_sequence2(latents)
 
                 if config.rft_n_samples > 0:
-                    denormalize = train_dataloader.dataset.denormalize
-                    preds, pred_cls = sample_fn(model, latents[:config.latent_dim[1], :], config.max_length - config.latent_dim[1], config, cls, 
-                                                    well_pos, latents_well, dips, latents_refl, dip_well, latents_init, n_samples=config.rft_n_samples)
-                    preds_vel = _to_sequence2(preds, inv=True, orig_shape=orig_shape)  
-                    preds_vel = vqvae_model.decode(preds_vel).squeeze(1)
-                    preds_vel = preds_vel.reshape(-1, config.rft_n_samples, *preds_vel.shape[-2:])
-                    selected_preds = torch.stack([denormalize({**batch['input'], 'tensor': x}) for x in preds_vel.transpose(0, 1)], dim=1)
-                    selected_labels = denormalize({**batch['input'], 'tensor': labels})
+                    with torch.no_grad():
+                        denormalize = train_dataloader.dataset.denormalize
+                        preds, pred_cls = sample_fn(model, latents[:config.latent_dim[1], :], config.max_length - config.latent_dim[1], config, cls, 
+                                                        well_pos, latents_well, dips, latents_refl, dip_well, latents_init, n_samples=config.rft_n_samples)
+                        preds_vel = _to_sequence2(preds, inv=True, orig_shape=orig_shape)  
+                        preds_vel = vqvae_model.decode(preds_vel).squeeze(1)
+                        preds_vel = preds_vel.reshape(-1, config.rft_n_samples, *preds_vel.shape[-2:])
+                        selected_preds = torch.stack([denormalize({**batch['input'], 'tensor': x}) for x in preds_vel.transpose(0, 1)], dim=1)
+                        selected_labels = denormalize({**batch['input'], 'tensor': labels})
 
-                    # Calculate RFT metrics (RMSE only for now)
-                    rmse = torch.sqrt(((selected_preds - selected_labels.unsqueeze(1)) ** 2).mean(dim=(2, 3)))
-                    best_idxs = rmse.argmin(dim=-1) + torch.arange(0, preds.shape[1], config.rft_n_samples).to(device)
-                    latents = preds[:, best_idxs] # Replace gold latents with best RFT samples
+                        # Calculate RFT metrics (RMSE only for now)
+                        rmse = torch.sqrt(((selected_preds - selected_labels.unsqueeze(1)) ** 2).mean(dim=(2, 3)))
+                        best_idxs = rmse.argmin(dim=-1) + torch.arange(0, preds.shape[1], config.rft_n_samples).to(device)
+                        latents = preds[:, best_idxs] # Replace gold latents with best RFT samples
                 
                 if not config.classify:
                     if teacher_forcing_ratio >= 1:

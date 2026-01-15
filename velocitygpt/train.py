@@ -364,11 +364,6 @@ def run_velenc(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_
         optim.load_state_dict(torch.load(checkpoint)['optim'])
         if scheduler is not None:
             scheduler.load_state_dict(torch.load(checkpoint)['scheduler'])
-
-        # Make sure KV cache is disabled properly
-        for layer in model.layers:
-            if hasattr(layer, 'disable_kv_cache'):
-                layer.disable_kv_cache()
         
     return model, avg_train_loss, avg_valid_loss, time_per_epoch
 
@@ -959,6 +954,11 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
         optim.load_state_dict(torch.load(checkpoint)['optim'])
         if scheduler is not None:
             scheduler.load_state_dict(torch.load(checkpoint)['scheduler'])
+
+        # Make sure KV cache is disabled properly
+        for layer in model.layers:
+            if hasattr(layer, 'disable_kv_cache'):
+                layer.disable_kv_cache()
 
     return model, avg_train_loss, avg_valid_loss, time_per_epoch
 

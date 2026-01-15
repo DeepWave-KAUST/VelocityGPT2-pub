@@ -241,9 +241,9 @@ def main(args):
                     args, verbose=False)
         idx_dict = {'syn1': [0], 'fld1': [0], 'fld2': [100], 'syn2': [0]}
         plot_example2(model, train_data, scaler1[0], pad, args, idx_dict[args.dataset_type], log=args.wandb_log, 
-                      prefix=1)
+                      prefix=1, plot_latents=True)
         plot_example2(model, test_data, scaler1[1], pad, args, idx_dict[args.dataset_type], log=args.wandb_log, 
-                      prefix=2)
+                      prefix=2, plot_latents=True)
     elif "sr" in args.training_stage:
         model, avg_train_loss, avg_valid_loss, time_per_epoch = \
             run_velup(model, optim, warmup, scheduler, loss_fn, train_dataloader, test_dataloader, scaler1,

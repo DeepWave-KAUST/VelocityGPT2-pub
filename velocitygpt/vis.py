@@ -378,7 +378,7 @@ def plot_example(vqvae_model, vqvae_refl_model, model, data, scaler1, pad, confi
     # Revert back to original dropout
     set_dropout_prob(model, config.hidden_dropout_prob)
 
-def plot_example2(model, data, scaler1, pad, config, idx, log=False, prefix=0):
+def plot_example2(model, data, scaler1, pad, config, idx, log=False, prefix=0, plot_latents=False):
     device = config.device
     dx = 1
     dt = 0.001
@@ -446,7 +446,10 @@ def plot_example2(model, data, scaler1, pad, config, idx, log=False, prefix=0):
             scalers_2 = {'syn1': 10, 'fld1': 10, 'fld2': 1e-2, 'syn2': 10}
             scalers = {"vqvae-training": 1, "vqvae-training-refl": scalers_2[config.dataset_type]}
             
-            f, ax = plt.subplots(1, 4, figsize=(20, 5), sharey=True, sharex=False)
+            n_col = 5 if plot_latents else 4
+            width = n_col / 4 * 20
+            sharey = False if plot_latents else True
+            f, ax = plt.subplots(1, n_col, figsize=(width, 5), sharey=sharey, sharex=False)
             im1 = ax[0].imshow(X.detach().T * scalers[ts], 
                             aspect=1, 
                             vmin=vlims[ts][0], 
@@ -485,6 +488,10 @@ def plot_example2(model, data, scaler1, pad, config, idx, log=False, prefix=0):
             ax[3].set_title("(Label - Output)")
             ax[3].set_xlabel("X")
             f.colorbar(im4, fraction=0.046, pad=0.04)
+            
+            if plot_latents:
+                ax[4].imshow(latents.detach().cpu().T, cmap='rainbow', vmin=0, vmax=config.K)
+                f.tight_layout()
 
             f.savefig(os.path.join(config.parent_dir, "example_prediction_{}_{}_{}.png").format(prefix, i+1, j+1))
             if log:

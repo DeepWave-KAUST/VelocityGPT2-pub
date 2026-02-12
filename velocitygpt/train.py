@@ -387,6 +387,75 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
     avg_valid_gen_loss = []
     avg_train_clf_acc = []
     avg_valid_clf_acc = []
+
+    def _condition_weights(well_mask, dip_mask, refl_mask, init_mask, weight_type='none'):
+        masks = torch.stack(
+            (
+                well_mask.to(torch.long),
+                dip_mask.to(torch.long),
+                refl_mask.to(torch.long),
+                init_mask.to(torch.long),
+            ),
+            dim=0,
+        )
+        cond_count = masks.sum(dim=0)
+        signature = (
+            (masks[0] << 0)
+            + (masks[1] << 1)
+            + (masks[2] << 2)
+            + (masks[3] << 3)
+        )
+        count_by_num = torch.bincount(cond_count, minlength=5).clamp_min(1)
+        count_by_sig = torch.bincount(signature, minlength=16).clamp_min(1)
+        if weight_type == 'combined':
+            weights = (1.0 / count_by_num[cond_count]) * (1.0 / count_by_sig[signature])
+        elif weight_type == 'num':
+            weights = (1.0 / count_by_num[cond_count])
+        elif weight_type == 'sig':
+            weights = (1.0 / count_by_sig[signature])
+        elif weight_type == 'none':
+            return None
+        else:
+            raise ValueError(f"Unknown weight_type: {weight_type}")
+        return weights * (weights.numel() / weights.sum().clamp_min(1e-12))
+
+    def _weighted_seq_loss(logits, targets, sample_weights):
+        logits_flat = logits.view(-1, logits.size(-1))
+        targets_flat = targets.reshape(-1).long()
+        if sample_weights is not None:
+            sample_weights = sample_weights.to(logits.device)
+        else:
+            return loss_fn(logits_flat, targets_flat)
+        ignore_index = getattr(loss_fn, "ignore_index", -100)
+        class_weight = getattr(loss_fn, "weight", None)
+        label_smoothing = getattr(loss_fn, "label_smoothing", 0.0)
+        token_loss = F.cross_entropy(
+            logits_flat,
+            targets_flat,
+            reduction="none",
+            ignore_index=ignore_index,
+            weight=class_weight,
+            label_smoothing=label_smoothing,
+        )
+        token_loss = token_loss.view(*targets.shape)
+        per_sample = token_loss.mean(dim=0)
+        return (per_sample * sample_weights).sum() / sample_weights.sum().clamp_min(1e-12)
+
+    def _weighted_clf_loss(logits, targets, sample_weights):
+        if sample_weights is None:
+            return loss_fn(logits, targets)
+        ignore_index = getattr(loss_fn, "ignore_index", -100)
+        class_weight = getattr(loss_fn, "weight", None)
+        label_smoothing = getattr(loss_fn, "label_smoothing", 0.0)
+        per_sample = F.cross_entropy(
+            logits,
+            targets,
+            reduction="none",
+            ignore_index=ignore_index,
+            weight=class_weight,
+            label_smoothing=label_smoothing,
+        )
+        return (per_sample * sample_weights).sum() / sample_weights.sum().clamp_min(1e-12)
     if config.patience is not None:
         checkpoint = os.path.join(config.parent_dir, str(os.getpid())+"checkpoint.pt")
         early_stopping = EarlyStopping(patience=config.patience, verbose=False, path=checkpoint)
@@ -507,6 +576,21 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                         latents_init[:, ~with_init_mask] = config.vocab_size
                     else:
                         latents_init = None
+                        with_init_mask = torch.ones(len(inputs), dtype=torch.bool).to(config.device)
+
+                    cond_well_mask = (
+                        with_well_mask.to(device) if config.well_cond_prob > 0 else torch.zeros(len(inputs), dtype=torch.bool, device=device)
+                    )
+                    cond_dip_mask = (
+                        with_dip_mask.to(device) if config.use_dip else torch.zeros(len(inputs), dtype=torch.bool, device=device)
+                    )
+                    cond_refl_mask = (
+                        with_refl_mask.to(device) if config.vqvae_refl_dir is not None else torch.zeros(len(inputs), dtype=torch.bool, device=device)
+                    )
+                    cond_init_mask = (
+                        with_init_mask.to(device) if config.use_init_prob else torch.zeros(len(inputs), dtype=torch.bool, device=device)
+                    )
+                    cond_weights = _condition_weights(cond_well_mask, cond_dip_mask, cond_refl_mask, cond_init_mask, config.loss_weight_type)
                     
                 if config.flip_train:
                     latents2, orig_shape = _to_sequence2(torch.flip(latents, dims=(1,)))
@@ -549,29 +633,26 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
 
                         # Second pass - Train model with modified latents
                         outputs = model(latents_new, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
-                    loss = loss_fn(outputs.view(-1, outputs.size(-1)), 
-                                latents.reshape(-1).long())
+                    # Build conditions weight for loss calculation
+                    loss = _weighted_seq_loss(outputs, latents, cond_weights)
                     if config.flip_train:
                         outputs2 = model(latents2, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
                         if config.flip_train_inv:
                             outputs2 = outputs2.reshape(orig_shape[1], orig_shape[2], *outputs2.shape[1:])
                             outputs2 = torch.flip(outputs2, dims=(1,)).reshape(-1, *outputs2.shape[1:])
-                            loss2 = loss_fn(outputs2.view(-1, outputs2.size(-1)), 
-                                            latents.reshape(-1))
+                            loss2 = _weighted_seq_loss(outputs2, latents, cond_weights)
                         else:
-                            loss2 = loss_fn(outputs2.view(-1, outputs2.size(-1)), 
-                                            latents2.reshape(-1))
+                            loss2 = _weighted_seq_loss(outputs2, latents2, cond_weights)
                         
                         loss = loss + loss2
                             
-                    loss_gen = torch.tensor([0])
-                    loss_clf = torch.tensor([0])
+                    loss_gen = torch.tensor(0.0, device=device)
+                    loss_clf = torch.tensor(0.0, device=device)
                 else:
                     clf_logits, outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
                     
-                    loss_gen = loss_fn(outputs.view(-1, outputs.size(-1)), 
-                                    latents.reshape(-1))
-                    loss_clf = loss_fn(clf_logits, cls)
+                    loss_gen = _weighted_seq_loss(outputs, latents, cond_weights)
+                    loss_clf = _weighted_clf_loss(clf_logits, cls, cond_weights)
                     loss = loss_gen + loss_clf
 
                 (loss / config.accum_grad).backward()
@@ -737,6 +818,21 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                         latents_init[:, ~with_init_mask] = config.vocab_size
                     else:
                         latents_init = None
+                        with_init_mask = torch.ones(len(inputs), dtype=torch.bool).to(config.device)
+
+                    cond_well_mask = (
+                        with_well_mask.to(device) if config.well_cond_prob > 0 else torch.zeros(len(inputs), dtype=torch.bool, device=device)
+                    )
+                    cond_dip_mask = (
+                        with_dip_mask.to(device) if config.use_dip else torch.zeros(len(inputs), dtype=torch.bool, device=device)
+                    )
+                    cond_refl_mask = (
+                        with_refl_mask.to(device) if config.vqvae_refl_dir is not None else torch.zeros(len(inputs), dtype=torch.bool, device=device)
+                    )
+                    cond_init_mask = (
+                        with_init_mask.to(device) if config.use_init_prob else torch.zeros(len(inputs), dtype=torch.bool, device=device)
+                    )
+                    cond_weights = _condition_weights(cond_well_mask, cond_dip_mask, cond_refl_mask, cond_init_mask, config.loss_weight_type)
 
                     if config.flip_train:
                         latents2, orig_shape = _to_sequence2(torch.flip(latents, dims=(1,)))
@@ -763,29 +859,25 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
 
                             # Second pass - Train model with modified latents
                             outputs = model(latents_new, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
-                        loss = loss_fn(outputs.view(-1, outputs.size(-1)), 
-                                    latents.reshape(-1).long())
+                        loss = _weighted_seq_loss(outputs, latents, cond_weights)
                         if config.flip_train:
                             outputs2 = model(latents2, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
                             if config.flip_train_inv:
                                 outputs2 = outputs2.reshape(orig_shape[1], orig_shape[2], *outputs2.shape[1:])
                                 outputs2 = torch.flip(outputs2, dims=(1,)).reshape(-1, *outputs2.shape[1:])
-                                loss2 = loss_fn(outputs2.view(-1, outputs2.size(-1)), 
-                                                latents.reshape(-1))
+                                loss2 = _weighted_seq_loss(outputs2, latents, cond_weights)
                             else:
-                                loss2 = loss_fn(outputs2.view(-1, outputs2.size(-1)), 
-                                                latents2.reshape(-1))
+                                loss2 = _weighted_seq_loss(outputs2, latents2, cond_weights)
 
                             loss = loss + loss2
                             
-                        loss_gen = torch.tensor([0])
-                        loss_clf = torch.tensor([0])
+                        loss_gen = torch.tensor(0.0, device=device)
+                        loss_clf = torch.tensor(0.0, device=device)
                     else:
                         clf_logits, outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
 
-                        loss_gen = loss_fn(outputs.view(-1, outputs.size(-1)), 
-                                        latents.reshape(-1))
-                        loss_clf = loss_fn(clf_logits, cls)
+                        loss_gen = _weighted_seq_loss(outputs, latents, cond_weights)
+                        loss_clf = _weighted_clf_loss(clf_logits, cls, cond_weights)
                         loss = loss_gen + loss_clf
                     
                     # calculate metrics
@@ -910,8 +1002,8 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                 ax.set_ylabel("Avg Loss")
                 f.canvas.draw()
 
-            if config.patience is not None:
-                early_stopping(avg_valid_loss[-1], model, optim=optim, scheduler=scheduler)
+            # if config.patience is not None:
+            #     early_stopping(avg_valid_loss[-1], model, optim=optim, scheduler=scheduler)
 
             if config.patience is not None:
                 if config.epoch_lim is not None:

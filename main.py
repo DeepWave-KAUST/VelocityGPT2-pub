@@ -160,6 +160,7 @@ def parse_args():
     parser.add_argument('--use_drop_path', type=float, default=0)
     parser.add_argument('--max_grad_norm', type=float, default=0)
     parser.add_argument('--rft_n_samples', type=int, default=0)
+    parser.add_argument('--loss_weight_type', type=str, default='none')
 
     # Misc parameters
     parser.add_argument('--device', type=str, default='cuda')

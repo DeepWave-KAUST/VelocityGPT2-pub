@@ -78,6 +78,7 @@ class GPT2(nn.Module):
     
     def forward(self, x, cls=None, well_pos=None, well_token=None, dip=None, refl=None, dip_well=None, init=None, input_pos=None, attn_mask=None):
         length, batch = x.shape
+        cache_is_none = getattr(self.layers[0].attn, 'kv_cache', None) is None and getattr(self.layers[0], 'linear_state', None) is None
         
         h = self.token_embeddings(x)
         
@@ -94,10 +95,10 @@ class GPT2(nn.Module):
         # prepend sos/cls token
         if not self.cls_token:
             sos = torch.ones(1, batch, self.hidden_size, device=x.device) * self.sos
-            h = torch.cat([sos, h[:-1, :, :]], axis=0) if len(h) > 2 else h # For KV caching support
+            h = torch.cat([sos, h[:-1, :, :]], axis=0) if len(h) > 2 or cache_is_none else h # For KV caching support
         elif self.cls_token and cls is not None:
             cls = self.cls_token_embeddings(cls).unsqueeze(0)
-            h = torch.cat([cls, h[:-1, :, :]], axis=0) if len(h) > 2 else h # For KV caching support
+            h = torch.cat([cls, h[:-1, :, :]], axis=0) if len(h) > 2 or cache_is_none else h # For KV caching support
             
         if self.use_dip and dip is not None:
             use_dip_embed = torch.ones(dip.shape[0], device=h.device).long()
@@ -105,7 +106,7 @@ class GPT2(nn.Module):
             use_dip_embed = self.use_dip_embeddings(use_dip_embed).unsqueeze(0)
             dip_embed = self.dip_embeddings(dip).transpose(0, 1)
             h += dip_embed
-            h = torch.cat([use_dip_embed, h], axis=0) if len(h) > 2 else h # For KV caching support
+            h = torch.cat([use_dip_embed, h], axis=0) if len(h) > 2 or cache_is_none else h # For KV caching support
             
         if self.vqvae_refl_dir is not None and refl is not None:
             use_refl_embed = torch.ones(refl.shape[1], device=h.device).long()

@@ -1034,3 +1034,124 @@ class DropPath(nn.Module):  # taken from timm
     
     def extra_repr(self):
         return f'(drop_prob=...)'
+
+class FeatureMapBlock2(nn.Module):
+    """Feature Map block
+    Final layer of U-Net which restores for the output channel dimensions to those of the input (or any other size)
+    using a 1x1 convolution.
+    """
+
+    def __init__(self, input_channels, output_channels):
+        super(FeatureMapBlock2, self).__init__()
+        self.conv = nn.Conv2d(input_channels, output_channels, kernel_size=1)
+
+    def forward(self, x):
+        x = self.conv(x)
+        return x
+
+class ContractingBlock2(nn.Module):
+    """Contracting block
+    Single block in contracting path composed of two convolutions followed by a max pool operation.
+    We allow also to optionally include a batch normalization and dropout step.
+    """
+
+    def __init__(self, input_channels, kernel_size=3, use_dropout=False, dropout_prob=0.1, use_bn=False):
+        super(ContractingBlock2, self).__init__()
+        self.conv1 = nn.Conv2d(input_channels, input_channels * 2, kernel_size=kernel_size, padding=kernel_size//2)#, kernel_size=11, padding=5)
+        self.conv2 = nn.Conv2d(input_channels * 2, input_channels * 2, kernel_size=kernel_size, padding=kernel_size//2)
+        self.activation = nn.LeakyReLU(0.2)
+        self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
+        if use_bn:
+            self.batchnorm = nn.BatchNorm2d(input_channels * 2, momentum=0.1)
+        self.use_bn = use_bn
+        if use_dropout:
+            self.dropout = nn.Dropout(dropout_prob)
+        self.use_dropout = use_dropout
+
+    def forward(self, x):
+        x = self.conv1(x)
+        if self.use_bn:
+            x = self.batchnorm(x)
+        if self.use_dropout:
+            x = self.dropout(x)
+        x = self.activation(x)
+        x = self.conv2(x)
+        if self.use_bn:
+            x = self.batchnorm(x)
+        if self.use_dropout:
+            x = self.dropout(x)
+        x1 = self.activation(x)
+        x = self.maxpool(x1)
+        return x1,x
+    
+class Bottle_neck2(nn.Module):
+    """Bottle neck of the U-Net
+    
+    We allow also to optionally include a batch normalization and dropout step.
+    """
+
+    def __init__(self, input_channels, kernel_size=3, use_dropout=False, dropout_prob=0.1, use_bn=False):
+        super(Bottle_neck2, self).__init__()
+        self.conv1 = nn.Conv2d(input_channels, input_channels * 2, kernel_size=kernel_size, padding=kernel_size//2)#, kernel_size=11, padding=5)
+        self.conv2 = nn.Conv2d(input_channels * 2, input_channels* 2, kernel_size=kernel_size, padding=kernel_size//2)
+        self.activation = nn.LeakyReLU(0.2)
+        if use_bn:
+            self.batchnorm = nn.BatchNorm2d(input_channels * 2, momentum=0.1)
+        self.use_bn = use_bn
+        if use_dropout:
+            self.dropout = nn.Dropout(dropout_prob)
+        self.use_dropout = use_dropout
+
+    def forward(self, x):
+        x = self.conv1(x)
+        if self.use_bn:
+            x = self.batchnorm(x)
+        if self.use_dropout:
+            x = self.dropout(x)
+        x = self.activation(x)
+        x = self.conv2(x)
+        if self.use_bn:
+            x = self.batchnorm(x)
+        if self.use_dropout:
+            x = self.dropout(x)
+        x = self.activation(x)
+        return x
+
+class ExpandingBlock2(nn.Module):
+    """Expanding block
+    Single block in expanding path composed of an upsampling layer, a convolution, a concatenation of
+    its output with the features at the same level in the contracting path, two additional convolutions.
+    We allow also to optionally include a batch normalization and dropout step.
+    """
+
+    def __init__(self, input_channels, kernel_size=3, use_dropout=False, dropout_prob=0.1, use_bn=False):
+        super(ExpandingBlock2, self).__init__()
+        self.upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        self.conv1 = nn.Conv2d(input_channels, input_channels // 2, kernel_size=kernel_size, padding=kernel_size//2)
+        self.conv2 = nn.Conv2d(input_channels, input_channels // 2, kernel_size=kernel_size, padding=kernel_size//2)
+        self.conv3 = nn.Conv2d(input_channels // 2, input_channels // 2, kernel_size=kernel_size, padding=kernel_size//2)
+        if use_bn:
+            self.batchnorm = nn.BatchNorm2d(input_channels // 2, momentum=0.1)
+        self.use_bn = use_bn
+        self.activation = nn.ReLU()
+        if use_dropout:
+            self.dropout = nn.Dropout(dropout_prob)
+        self.use_dropout = use_dropout
+
+    def forward(self, x, skip_con_x):
+        x = self.upsample(x)
+        x = self.conv1(x)
+        x = torch.cat([x, skip_con_x], axis=1)
+        x = self.conv2(x)
+        if self.use_bn:
+            x = self.batchnorm(x)
+        if self.use_dropout:
+            x = self.dropout(x)
+        x = self.activation(x)
+        x = self.conv3(x)
+        if self.use_bn:
+            x = self.batchnorm(x)
+        if self.use_dropout:
+            x = self.dropout(x)
+        x = self.activation(x)
+        return x

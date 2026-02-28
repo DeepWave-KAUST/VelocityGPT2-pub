@@ -78,7 +78,11 @@ class GPT2(nn.Module):
     
     def forward(self, x, cls=None, well_pos=None, well_token=None, dip=None, refl=None, dip_well=None, init=None, input_pos=None, attn_mask=None):
         length, batch = x.shape
-        cache_is_none = getattr(self.layers[0].attn, 'kv_cache', None) is None and getattr(self.layers[0], 'linear_state', None) is None
+        if getattr(self.layers[0].attn, 'kv_cache', None) is not None:
+            cache_is_none = torch.all(self.layers[0].attn.kv_cache.k_cache == 0)
+        else:
+            cache_is_none = True
+        cache_is_none = cache_is_none and getattr(self.layers[0], 'linear_state', None) is None
         
         h = self.token_embeddings(x)
         
@@ -185,3 +189,42 @@ class GPT2(nn.Module):
         h = torch.mean(h, dim=0)  # average pool over sequence
         # return classification logits and generative logits
         return self.clf_head(h), logits
+
+class UNet2(nn.Module):
+    """UNet architecture
+    UNet architecture composed of a series of contracting blocks followed by expanding blocks.
+    Most UNet implementations available online hard-code a certain number of levels. Here,
+    the number of levels for the contracting and expanding paths can be defined by the user and the
+    UNet is built in such a way that the same code can be used for any number of levels without modification.
+    """
+
+    def __init__(self, input_channels=1, output_channels=1, hidden_channels=64, levels=2, kernel_size=3, use_dropout=False, dropout_prob=0.1, use_bn=False, config=None):
+        super(UNet2, self).__init__()
+        self.levels = levels
+        self.upfeature = FeatureMapBlock2(input_channels, hidden_channels)
+        self.contracts = nn.ModuleList([ContractingBlock2(hidden_channels * (2 ** level), kernel_size=kernel_size, use_dropout=use_dropout, dropout_prob=dropout_prob, use_bn=use_bn) for level in range(levels)])
+        self.bottleneck = Bottle_neck2(hidden_channels * (2 ** levels), kernel_size=kernel_size, use_bn=use_bn, use_dropout=use_dropout, dropout_prob=dropout_prob)
+        self.expands = nn.ModuleList([ExpandingBlock2(hidden_channels * (2 ** (levels - level+1)), kernel_size=kernel_size, use_bn=use_bn, use_dropout=use_dropout, dropout_prob=dropout_prob) for level in range(levels)])
+        self.downfeature1 = FeatureMapBlock2(hidden_channels*(2**1), hidden_channels)
+        # self.downfeature2 = FeatureMapBlock(hidden_channels*(2**1), output_channels)
+        self.downfeature2 = FeatureMapBlock2(hidden_channels, output_channels)
+
+        self.mask_token = nn.Parameter(torch.empty(1, 1, config.vocab_size), requires_grad=True)
+        nn.init.uniform_(self.mask_token, -1, 1)
+
+    def forward(self, x, **kwargs):
+        xenc = []
+        x = self.upfeature(x)
+        # xenc.append(x)
+        for level, contract in enumerate(self.contracts):
+            x1,x = contract(x)
+            xenc.append(x1)
+        # print('len(xenc):', len(xenc))
+        # print('xenc[-1].shape:', xenc[-1].shape)
+        # print('xenc[0].shape:', xenc[0].shape)
+        x = self.bottleneck(x)
+        for level, expand in enumerate(self.expands):
+            x = expand(x, xenc[self.levels - level - 1])
+        x = self.downfeature1(x)
+        x = self.downfeature2(x).squeeze(1)
+        return x

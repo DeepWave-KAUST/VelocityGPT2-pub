@@ -314,66 +314,79 @@ def build_model(config):
                     input_size=(config.batch_size, config.input_dim, config.image_size[0], config.image_size[1]), 
                     device=config.device))
     else:
-        model = GPT2(config)
-        if config.pretrained_model_dir is not None:
-            m = model.load_state_dict(load_from_pt_or_checkpoint(config.pretrained_model_dir, "model"), strict=False)
-            print("Loaded pretrained model. Message:", m)
-        if config.cont_dir is not None:
-            model.load_state_dict(load_from_pt_or_checkpoint(config.cont_dir, "model"))
-        print(model)
-        
-        # Create input tensors with mock values
-        latents = torch.randint(high=config.vocab_size, size=(config.max_length, config.batch_size))
-        cls = torch.randint(high=config.num_classes, size=(config.batch_size,))
-        
-        # Create input_data with default mock values
-        input_data = [latents, cls]
-        
-        if config.well_cond_prob > 0:
-            well_pos = torch.randint(high=config.image_size[0], size=(config.batch_size,))
-            latents_well = torch.randint(high=config.vocab_size, size=(config.latent_dim[1], config.batch_size))
-        else:
-            # Create mock tensors for well_pos and latents_well with appropriate sizes
-            well_pos = torch.zeros(config.batch_size, dtype=torch.long)
-            latents_well = torch.zeros(config.latent_dim[1], config.batch_size, dtype=torch.long)
-        
-        input_data.extend([well_pos, latents_well])
-        
-        if config.use_dip:
-            dip = torch.randint(high=len(config.dip_bins), size=(config.batch_size, config.max_length))
-        else:
-            # Create a mock tensor for dip with appropriate size
-            dip = torch.zeros(config.batch_size, config.max_length, dtype=torch.long)
-        
-        input_data.append(dip)
-        
-        if config.vqvae_refl_dir is not None:
-            refl = torch.randint(high=config.refl_vocab_size, size=(config.max_length, config.batch_size))
-        else:
-            # Create a mock tensor for refl with appropriate size
-            refl = torch.zeros(config.max_length, config.batch_size, dtype=torch.long)
-        
-        input_data.append(refl)
-        
-        if config.add_dip_to_well:
-            dip_well = torch.randint(high=len(config.dip_bins), size=(config.batch_size, config.latent_dim[1]))
-        else:
-            # Create a mock tensor for dip_well with appropriate size
-            dip_well = torch.zeros(config.batch_size, config.latent_dim[1], dtype=torch.long)
-        
-        input_data.append(dip_well)
+        if config.model_type == "gpt":
+            model = GPT2(config)
+            if config.pretrained_model_dir is not None:
+                m = model.load_state_dict(load_from_pt_or_checkpoint(config.pretrained_model_dir, "model"), strict=False)
+                print("Loaded pretrained model. Message:", m)
+            if config.cont_dir is not None:
+                model.load_state_dict(load_from_pt_or_checkpoint(config.cont_dir, "model"))
+            print(model)
+            
+            # Create input tensors with mock values
+            latents = torch.randint(high=config.vocab_size, size=(config.max_length, config.batch_size))
+            cls = torch.randint(high=config.num_classes, size=(config.batch_size,))
+            
+            # Create input_data with default mock values
+            input_data = [latents, cls]
+            
+            if config.well_cond_prob > 0:
+                well_pos = torch.randint(high=config.image_size[0], size=(config.batch_size,))
+                latents_well = torch.randint(high=config.vocab_size, size=(config.latent_dim[1], config.batch_size))
+            else:
+                # Create mock tensors for well_pos and latents_well with appropriate sizes
+                well_pos = torch.zeros(config.batch_size, dtype=torch.long)
+                latents_well = torch.zeros(config.latent_dim[1], config.batch_size, dtype=torch.long)
+            
+            input_data.extend([well_pos, latents_well])
+            
+            if config.use_dip:
+                dip = torch.randint(high=len(config.dip_bins), size=(config.batch_size, config.max_length))
+            else:
+                # Create a mock tensor for dip with appropriate size
+                dip = torch.zeros(config.batch_size, config.max_length, dtype=torch.long)
+            
+            input_data.append(dip)
+            
+            if config.vqvae_refl_dir is not None:
+                refl = torch.randint(high=config.refl_vocab_size, size=(config.max_length, config.batch_size))
+            else:
+                # Create a mock tensor for refl with appropriate size
+                refl = torch.zeros(config.max_length, config.batch_size, dtype=torch.long)
+            
+            input_data.append(refl)
+            
+            if config.add_dip_to_well:
+                dip_well = torch.randint(high=len(config.dip_bins), size=(config.batch_size, config.latent_dim[1]))
+            else:
+                # Create a mock tensor for dip_well with appropriate size
+                dip_well = torch.zeros(config.batch_size, config.latent_dim[1], dtype=torch.long)
+            
+            input_data.append(dip_well)
 
-        if config.use_init_prob:
-            init = torch.randint(high=config.vocab_size, size=(config.max_length, config.batch_size))
-        else:
-            # Create a mock tensor for refl with appropriate size
-            init = torch.zeros(config.max_length, config.batch_size, dtype=torch.long)
-        
-        input_data.append(init)
-        
-        summary(model.to(config.device), 
-                input_data=input_data, 
-                device=config.device)
+            if config.use_init_prob:
+                init = torch.randint(high=config.vocab_size, size=(config.max_length, config.batch_size))
+            else:
+                # Create a mock tensor for refl with appropriate size
+                init = torch.zeros(config.max_length, config.batch_size, dtype=torch.long)
+            
+            input_data.append(init)
+            
+            summary(model.to(config.device), 
+                    input_data=input_data, 
+                    device=config.device)
+        elif config.model_type == "unet":
+            model = UNet2(
+                input_channels=int(config.use_refl_prob > 0) + int(config.use_init_prob > 0) + int(config.well_cond_prob > 0), 
+                output_channels=1, 
+                hidden_channels=config.hidden_size, 
+                levels=config.num_hidden_layers, 
+                kernel_size=3, 
+                use_dropout=True, 
+                dropout_prob=0.1, 
+                use_bn=False, 
+                config=config
+            )
     
     return model.to(config.device)
 

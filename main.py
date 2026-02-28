@@ -81,6 +81,7 @@ def parse_args():
     parser.add_argument('--kmeans_full_fit', action='store_true')
 
     # GPT Model parameters
+    parser.add_argument('--model_type', type=str, default='gpt')
     parser.add_argument('--latent_dim', type=int, nargs=2, default=[16, 16])
     parser.add_argument('--vocab_size', type=int, default=128)
     parser.add_argument('--refl_vocab_size', type=int, default=128)

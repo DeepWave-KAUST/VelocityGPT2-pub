@@ -518,142 +518,164 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                     else:
                         dips = None
 
-                # process  
-                with torch.no_grad():
-                    if config.vqvae_dir == config.vqvae_refl_dir:
-                        latents = vqvae_model.encode(torch.stack((inputs, torch.zeros_like(inputs)), dim=1))
-                    else:
-                        latents = vqvae_model.encode(inputs.unsqueeze(1))
-                    if config.well_cond_prob > 0:
-                        with_well_mask = (torch.rand(len(inputs)) < config.well_cond_prob)
-                        well_pos = torch.randint(high=config.image_size[0], size=(len(inputs),)).to(config.device)
-                        
-                        # Extract 1d velocity
-                        well_vel = inputs.clone()
-                        well_vel = well_vel[range(len(well_pos)), well_pos]
-                        well_vel = well_vel.unsqueeze(1).repeat(1, config.image_size[0], 1)
-                        latents_well = vqvae_model.encode(well_vel.unsqueeze(1))
-                        latents_well = latents_well[:, config.latent_dim[0]//2, :]
-                        
-                        # Change unselected well_pos and latents_well to OOV
-                        well_pos[~with_well_mask] = config.image_size[0]
-                        latents_well[~with_well_mask] = config.vocab_size
-                        
-                        latents_well = latents_well.transpose(0, 1)
-                    else:
-                        well_pos, latents_well = None, None
-                        
-                    if config.use_dip:
-                        with_dip_mask = (torch.rand(len(inputs)) < config.use_dip_prob)
-                        dips[~with_dip_mask] = len(config.dip_bins)
-                        
-                    if config.add_dip_to_well and config.use_dip and config.well_cond_prob:
-                        well_pos2 = torch.clamp(well_pos.clone(), max=config.image_size[0]-1) 
-                        dip_well = dips.clone()
-                        dip_well = dip_well.view(dip_well.shape[0], config.latent_dim[0], config.latent_dim[1])[range(len(well_pos2)), :, well_pos2//config.factor]
-                        dip_well = dip_well.view(dip_well.shape[0], -1)
-                    else:
-                        dip_well = None
-                        
-                    if config.vqvae_refl_dir is not None:
-                        if config.vqvae_dir == config.vqvae_refl_dir:
-                            latents_refl = vqvae_refl_model.encode(torch.stack((torch.zeros_like(refl), refl), dim=1))
-                        else:
-                            latents_refl = vqvae_refl_model.encode(refl.unsqueeze(1))
-                        latents_refl, orig_shape = _to_sequence2(latents_refl)
-                        with_refl_mask = (torch.rand(len(inputs)) < config.use_refl_prob)
-                        latents_refl[:, ~with_refl_mask] = config.refl_vocab_size
-                    else:
-                        latents_refl = None
-
-                    if config.use_init_prob:
-                        if config.vqvae_dir == config.vqvae_refl_dir:
-                            latents_init = vqvae_model.encode(torch.stack((init, torch.zeros_like(init)), dim=1))
-                        else:
-                            latents_init = vqvae_model.encode(init.unsqueeze(1))
-                        latents_init, _ = _to_sequence2(latents_init)
-                        with_init_mask = (torch.rand(len(inputs)) < config.use_init_prob)
-                        latents_init[:, ~with_init_mask] = config.vocab_size
-                    else:
-                        latents_init = None
-                        with_init_mask = torch.ones(len(inputs), dtype=torch.bool).to(config.device)
-
-                    cond_well_mask = (
-                        with_well_mask.to(device) if config.well_cond_prob > 0 else torch.zeros(len(inputs), dtype=torch.bool, device=device)
-                    )
-                    cond_dip_mask = (
-                        with_dip_mask.to(device) if config.use_dip else torch.zeros(len(inputs), dtype=torch.bool, device=device)
-                    )
-                    cond_refl_mask = (
-                        with_refl_mask.to(device) if config.vqvae_refl_dir is not None else torch.zeros(len(inputs), dtype=torch.bool, device=device)
-                    )
-                    cond_init_mask = (
-                        with_init_mask.to(device) if config.use_init_prob else torch.zeros(len(inputs), dtype=torch.bool, device=device)
-                    )
-                    cond_weights = _condition_weights(cond_well_mask, cond_dip_mask, cond_refl_mask, cond_init_mask, config.loss_weight_type)
-                    
-                if config.flip_train:
-                    latents2, orig_shape = _to_sequence2(torch.flip(latents, dims=(1,)))
-                latents, orig_shape = _to_sequence2(latents)
-
-                if config.rft_n_samples > 0:
+                # process 
+                if config.model_type == "gpt": 
                     with torch.no_grad():
-                        denormalize = train_dataloader.dataset.denormalize
-                        preds, pred_cls = sample_fn(model, latents[:config.latent_dim[1], :], config.max_length - config.latent_dim[1], config, cls, 
-                                                        well_pos, latents_well, dips, latents_refl, dip_well, latents_init, n_samples=config.rft_n_samples)
-                        preds_vel = _to_sequence2(preds, inv=True, orig_shape=orig_shape)  
-                        preds_vel = vqvae_model.decode(preds_vel).squeeze(1)
-                        preds_vel = preds_vel.reshape(-1, config.rft_n_samples, *preds_vel.shape[-2:])
-                        selected_preds = torch.stack([denormalize({**batch['input'], 'tensor': x}) for x in preds_vel.transpose(0, 1)], dim=1)
-                        selected_labels = denormalize({**batch['input'], 'tensor': labels})
-
-                        # Calculate RFT metrics (RMSE only for now)
-                        rmse = torch.sqrt(((selected_preds - selected_labels.unsqueeze(1)) ** 2).mean(dim=(2, 3)))
-                        best_idxs = rmse.argmin(dim=-1) + torch.arange(0, preds.shape[1], config.rft_n_samples).to(device)
-                        latents = preds[:, best_idxs] # Replace gold latents with best RFT samples
-                
-                if not config.classify:
-                    if teacher_forcing_ratio >= 1:
-                        outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
-                    else:
-                        # First pass - Get predictions with full ground truth
-                        with torch.no_grad():
-                            outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
-
-                        # Generate teacher forcing mask
-                        rand_gold_pos = torch.rand(*latents.shape) <= teacher_forcing_ratio
-                        
-                        # Clone latents before modifying
-                        latents_new = latents.clone()
-
-                        # Replace sampled positions with predicted values
-                        predicted_tokens = torch.multinomial(outputs.softmax(-1).reshape(-1, outputs.size(-1)), 1)  # Get token predictions
-                        predicted_tokens = predicted_tokens.reshape(*latents.shape).to(latents.dtype)
-                        latents_new[~rand_gold_pos] = predicted_tokens[~rand_gold_pos]  # Replace only sampled positions
-
-                        # Second pass - Train model with modified latents
-                        outputs = model(latents_new, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
-                    # Build conditions weight for loss calculation
-                    loss = _weighted_seq_loss(outputs, latents, cond_weights)
-                    if config.flip_train:
-                        outputs2 = model(latents2, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
-                        if config.flip_train_inv:
-                            outputs2 = outputs2.reshape(orig_shape[1], orig_shape[2], *outputs2.shape[1:])
-                            outputs2 = torch.flip(outputs2, dims=(1,)).reshape(-1, *outputs2.shape[1:])
-                            loss2 = _weighted_seq_loss(outputs2, latents, cond_weights)
+                        if config.vqvae_dir == config.vqvae_refl_dir:
+                            latents = vqvae_model.encode(torch.stack((inputs, torch.zeros_like(inputs)), dim=1))
                         else:
-                            loss2 = _weighted_seq_loss(outputs2, latents2, cond_weights)
-                        
-                        loss = loss + loss2
+                            latents = vqvae_model.encode(inputs.unsqueeze(1))
+                        if config.well_cond_prob > 0:
+                            with_well_mask = (torch.rand(len(inputs)) < config.well_cond_prob)
+                            well_pos = torch.randint(high=config.image_size[0], size=(len(inputs),)).to(config.device)
                             
+                            # Extract 1d velocity
+                            well_vel = inputs.clone()
+                            well_vel = well_vel[range(len(well_pos)), well_pos]
+                            well_vel = well_vel.unsqueeze(1).repeat(1, config.image_size[0], 1)
+                            latents_well = vqvae_model.encode(well_vel.unsqueeze(1))
+                            latents_well = latents_well[:, config.latent_dim[0]//2, :]
+                            
+                            # Change unselected well_pos and latents_well to OOV
+                            well_pos[~with_well_mask] = config.image_size[0]
+                            latents_well[~with_well_mask] = config.vocab_size
+                            
+                            latents_well = latents_well.transpose(0, 1)
+                        else:
+                            well_pos, latents_well = None, None
+                            
+                        if config.use_dip:
+                            with_dip_mask = (torch.rand(len(inputs)) < config.use_dip_prob)
+                            dips[~with_dip_mask] = len(config.dip_bins)
+                            
+                        if config.add_dip_to_well and config.use_dip and config.well_cond_prob:
+                            well_pos2 = torch.clamp(well_pos.clone(), max=config.image_size[0]-1) 
+                            dip_well = dips.clone()
+                            dip_well = dip_well.view(dip_well.shape[0], config.latent_dim[0], config.latent_dim[1])[range(len(well_pos2)), :, well_pos2//config.factor]
+                            dip_well = dip_well.view(dip_well.shape[0], -1)
+                        else:
+                            dip_well = None
+                            
+                        if config.vqvae_refl_dir is not None:
+                            if config.vqvae_dir == config.vqvae_refl_dir:
+                                latents_refl = vqvae_refl_model.encode(torch.stack((torch.zeros_like(refl), refl), dim=1))
+                            else:
+                                latents_refl = vqvae_refl_model.encode(refl.unsqueeze(1))
+                            latents_refl, orig_shape = _to_sequence2(latents_refl)
+                            with_refl_mask = (torch.rand(len(inputs)) < config.use_refl_prob)
+                            latents_refl[:, ~with_refl_mask] = config.refl_vocab_size
+                        else:
+                            latents_refl = None
+
+                        if config.use_init_prob:
+                            if config.vqvae_dir == config.vqvae_refl_dir:
+                                latents_init = vqvae_model.encode(torch.stack((init, torch.zeros_like(init)), dim=1))
+                            else:
+                                latents_init = vqvae_model.encode(init.unsqueeze(1))
+                            latents_init, _ = _to_sequence2(latents_init)
+                            with_init_mask = (torch.rand(len(inputs)) < config.use_init_prob)
+                            latents_init[:, ~with_init_mask] = config.vocab_size
+                        else:
+                            latents_init = None
+                            with_init_mask = torch.ones(len(inputs), dtype=torch.bool).to(config.device)
+
+                        cond_well_mask = (
+                            with_well_mask.to(device) if config.well_cond_prob > 0 else torch.zeros(len(inputs), dtype=torch.bool, device=device)
+                        )
+                        cond_dip_mask = (
+                            with_dip_mask.to(device) if config.use_dip else torch.zeros(len(inputs), dtype=torch.bool, device=device)
+                        )
+                        cond_refl_mask = (
+                            with_refl_mask.to(device) if config.vqvae_refl_dir is not None else torch.zeros(len(inputs), dtype=torch.bool, device=device)
+                        )
+                        cond_init_mask = (
+                            with_init_mask.to(device) if config.use_init_prob else torch.zeros(len(inputs), dtype=torch.bool, device=device)
+                        )
+                        cond_weights = _condition_weights(cond_well_mask, cond_dip_mask, cond_refl_mask, cond_init_mask, config.loss_weight_type)
+                        
+                    if config.flip_train:
+                        latents2, orig_shape = _to_sequence2(torch.flip(latents, dims=(1,)))
+                    latents, orig_shape = _to_sequence2(latents)
+
+                    if config.rft_n_samples > 0:
+                        with torch.no_grad():
+                            denormalize = train_dataloader.dataset.denormalize
+                            preds, pred_cls = sample_fn(model, latents[:config.latent_dim[1], :], config.max_length - config.latent_dim[1], config, cls, 
+                                                            well_pos, latents_well, dips, latents_refl, dip_well, latents_init, n_samples=config.rft_n_samples)
+                            preds_vel = _to_sequence2(preds, inv=True, orig_shape=orig_shape)  
+                            preds_vel = vqvae_model.decode(preds_vel).squeeze(1)
+                            preds_vel = preds_vel.reshape(-1, config.rft_n_samples, *preds_vel.shape[-2:])
+                            selected_preds = torch.stack([denormalize({**batch['input'], 'tensor': x}) for x in preds_vel.transpose(0, 1)], dim=1)
+                            selected_labels = denormalize({**batch['input'], 'tensor': labels})
+
+                            # Calculate RFT metrics (RMSE only for now)
+                            rmse = torch.sqrt(((selected_preds - selected_labels.unsqueeze(1)) ** 2).mean(dim=(2, 3)))
+                            best_idxs = rmse.argmin(dim=-1) + torch.arange(0, preds.shape[1], config.rft_n_samples).to(device)
+                            latents = preds[:, best_idxs] # Replace gold latents with best RFT samples
+                    
+                    if not config.classify:
+                        if teacher_forcing_ratio >= 1:
+                            outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
+                        else:
+                            # First pass - Get predictions with full ground truth
+                            with torch.no_grad():
+                                outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
+
+                            # Generate teacher forcing mask
+                            rand_gold_pos = torch.rand(*latents.shape) <= teacher_forcing_ratio
+                            
+                            # Clone latents before modifying
+                            latents_new = latents.clone()
+
+                            # Replace sampled positions with predicted values
+                            predicted_tokens = torch.multinomial(outputs.softmax(-1).reshape(-1, outputs.size(-1)), 1)  # Get token predictions
+                            predicted_tokens = predicted_tokens.reshape(*latents.shape).to(latents.dtype)
+                            latents_new[~rand_gold_pos] = predicted_tokens[~rand_gold_pos]  # Replace only sampled positions
+
+                            # Second pass - Train model with modified latents
+                            outputs = model(latents_new, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
+                        # Build conditions weight for loss calculation
+                        loss = _weighted_seq_loss(outputs, latents, cond_weights)
+                        if config.flip_train:
+                            outputs2 = model(latents2, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
+                            if config.flip_train_inv:
+                                outputs2 = outputs2.reshape(orig_shape[1], orig_shape[2], *outputs2.shape[1:])
+                                outputs2 = torch.flip(outputs2, dims=(1,)).reshape(-1, *outputs2.shape[1:])
+                                loss2 = _weighted_seq_loss(outputs2, latents, cond_weights)
+                            else:
+                                loss2 = _weighted_seq_loss(outputs2, latents2, cond_weights)
+                            
+                            loss = loss + loss2
+                                
+                        loss_gen = torch.tensor(0.0, device=device)
+                        loss_clf = torch.tensor(0.0, device=device)
+                    else:
+                        clf_logits, outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
+                        
+                        loss_gen = _weighted_seq_loss(outputs, latents, cond_weights)
+                        loss_clf = _weighted_clf_loss(clf_logits, cls, cond_weights)
+                        loss = loss_gen + loss_clf
+
+                elif config.model_type == "unet":
+                    well_pos = torch.randint(high=config.image_size[0], size=(len(inputs),)).to(config.device)
+                    well_mask = F.one_hot(well_pos, num_classes=config.image_size[0]).unsqueeze(2).to(config.device)
+                    with_well_mask = (torch.rand(len(inputs)) < config.well_cond_prob).to(config.device)
+                    well_mask = well_mask * with_well_mask[:, None, None]
+
+                    outputs = model(
+                        torch.stack(
+                            [
+                                init,
+                                refl,
+                                inputs * well_mask,
+                            ],
+                            dim=1
+                        )
+                    )
+
+                    loss = loss_fn(outputs, labels)
                     loss_gen = torch.tensor(0.0, device=device)
                     loss_clf = torch.tensor(0.0, device=device)
-                else:
-                    clf_logits, outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
-                    
-                    loss_gen = _weighted_seq_loss(outputs, latents, cond_weights)
-                    loss_clf = _weighted_clf_loss(clf_logits, cls, cond_weights)
-                    loss = loss_gen + loss_clf
 
                 (loss / config.accum_grad).backward()
 
@@ -668,8 +690,9 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                 losses_gen_train += loss_gen.item()
                 losses_clf_train += loss_clf.item()
                 with torch.no_grad():
-                    outputs = _to_sequence2(outputs.argmax(-1), inv=True, orig_shape=orig_shape)
-                    outputs = vqvae_model.decode(outputs).squeeze(1)
+                    if config.model_type == "gpt":
+                        outputs = _to_sequence2(outputs.argmax(-1), inv=True, orig_shape=orig_shape)
+                        outputs = vqvae_model.decode(outputs).squeeze(1)
     #                 outputs = _to_sequence(outputs, inv=True, orig_shape=orig_shape)
                     if config.dataset_type in ["fld2", "syn2"]:
                         denormalize = train_dataloader.dataset.denormalize
@@ -762,130 +785,153 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
                             dips = None
 
                     # process  
-                    if config.vqvae_dir == config.vqvae_refl_dir:
-                        latents = vqvae_model.encode(torch.stack((inputs, torch.zeros_like(inputs)), dim=1))
-                    else:
-                        latents = vqvae_model.encode(inputs.unsqueeze(1))
-                    if config.well_cond_prob > 0:
-                        with_well_mask = (torch.rand(len(inputs)) < config.well_cond_prob)
-                        well_pos = torch.randint(high=config.image_size[0], size=(len(inputs),)).to(config.device)
-                        
-                        # Extract 1d velocity
-                        well_vel = inputs.clone()
-                        well_vel = well_vel[range(len(well_pos)), well_pos]
-                        well_vel = well_vel.unsqueeze(1).repeat(1, config.image_size[0], 1)
-                        latents_well = vqvae_model.encode(well_vel.unsqueeze(1))
-                        latents_well = latents_well[:, config.latent_dim[0]//2, :]
-                        
-                        # Change unselected well_pos and latents_well to OOV
-                        well_pos[~with_well_mask] = config.image_size[0]
-                        latents_well[~with_well_mask] = config.vocab_size
-                        
-                        latents_well = latents_well.transpose(0, 1)
-                    else:
-                        well_pos, latents_well = None, None
-                        
-                    if config.use_dip:
-                        with_dip_mask = (torch.rand(len(inputs)) < config.use_dip_prob)
-                        dips[~with_dip_mask] = len(config.dip_bins)
-                        
-                    if config.add_dip_to_well and config.use_dip and config.well_cond_prob:
-                        well_pos2 = torch.clamp(well_pos.clone(), max=config.image_size[0]-1) 
-                        dip_well = dips.clone()
-                        dip_well = dip_well.view(dip_well.shape[0], config.latent_dim[0], config.latent_dim[1])[range(len(well_pos2)), :, well_pos2//config.factor]
-                        dip_well = dip_well.view(dip_well.shape[0], -1)
-                    else:
-                        dip_well = None
-                        
-                    if config.vqvae_refl_dir is not None:
+                    if config.model_type == "gpt": 
                         if config.vqvae_dir == config.vqvae_refl_dir:
-                            latents_refl = vqvae_refl_model.encode(torch.stack((torch.zeros_like(refl), refl), dim=1))
+                            latents = vqvae_model.encode(torch.stack((inputs, torch.zeros_like(inputs)), dim=1))
                         else:
-                            latents_refl = vqvae_refl_model.encode(refl.unsqueeze(1))
-                        latents_refl, orig_shape = _to_sequence2(latents_refl)
-                        with_refl_mask = (torch.rand(len(inputs)) < config.use_refl_prob)
-                        latents_refl[:, ~with_refl_mask] = config.refl_vocab_size
-                    else:
-                        latents_refl = None
-
-                    if config.use_init_prob:
-                        if config.vqvae_dir == config.vqvae_refl_dir:
-                            latents_init = vqvae_model.encode(torch.stack((init, torch.zeros_like(init)), dim=1))
-                        else:
-                            latents_init = vqvae_model.encode(init.unsqueeze(1))
-                        latents_init, _ = _to_sequence2(latents_init)
-                        with_init_mask = (torch.rand(len(inputs)) < config.use_init_prob)
-                        latents_init[:, ~with_init_mask] = config.vocab_size
-                    else:
-                        latents_init = None
-                        with_init_mask = torch.ones(len(inputs), dtype=torch.bool).to(config.device)
-
-                    cond_well_mask = (
-                        with_well_mask.to(device) if config.well_cond_prob > 0 else torch.zeros(len(inputs), dtype=torch.bool, device=device)
-                    )
-                    cond_dip_mask = (
-                        with_dip_mask.to(device) if config.use_dip else torch.zeros(len(inputs), dtype=torch.bool, device=device)
-                    )
-                    cond_refl_mask = (
-                        with_refl_mask.to(device) if config.vqvae_refl_dir is not None else torch.zeros(len(inputs), dtype=torch.bool, device=device)
-                    )
-                    cond_init_mask = (
-                        with_init_mask.to(device) if config.use_init_prob else torch.zeros(len(inputs), dtype=torch.bool, device=device)
-                    )
-                    cond_weights = _condition_weights(cond_well_mask, cond_dip_mask, cond_refl_mask, cond_init_mask, config.loss_weight_type)
-
-                    if config.flip_train:
-                        latents2, orig_shape = _to_sequence2(torch.flip(latents, dims=(1,)))
-                    latents, orig_shape = _to_sequence2(latents)
-
-                    if not config.classify:
-                        if teacher_forcing_ratio >= 1:
-                            outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
-                        else:
-                            # First pass - Get predictions with full ground truth
-                            with torch.no_grad():
-                                outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
-
-                            # Generate teacher forcing mask
-                            rand_gold_pos = torch.rand(*latents.shape) <= teacher_forcing_ratio
+                            latents = vqvae_model.encode(inputs.unsqueeze(1))
+                        if config.well_cond_prob > 0:
+                            with_well_mask = (torch.rand(len(inputs)) < config.well_cond_prob)
+                            well_pos = torch.randint(high=config.image_size[0], size=(len(inputs),)).to(config.device)
                             
-                            # Clone latents before modifying
-                            latents_new = latents.clone()
-
-                            # Replace sampled positions with predicted values
-                            predicted_tokens = torch.multinomial(outputs.softmax(-1).reshape(-1, outputs.size(-1)), 1)  # Get token predictions
-                            predicted_tokens = predicted_tokens.reshape(*latents.shape).to(latents.dtype)
-                            latents_new[~rand_gold_pos] = predicted_tokens[~rand_gold_pos]  # Replace only sampled positions
-
-                            # Second pass - Train model with modified latents
-                            outputs = model(latents_new, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
-                        loss = _weighted_seq_loss(outputs, latents, cond_weights)
-                        if config.flip_train:
-                            outputs2 = model(latents2, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
-                            if config.flip_train_inv:
-                                outputs2 = outputs2.reshape(orig_shape[1], orig_shape[2], *outputs2.shape[1:])
-                                outputs2 = torch.flip(outputs2, dims=(1,)).reshape(-1, *outputs2.shape[1:])
-                                loss2 = _weighted_seq_loss(outputs2, latents, cond_weights)
+                            # Extract 1d velocity
+                            well_vel = inputs.clone()
+                            well_vel = well_vel[range(len(well_pos)), well_pos]
+                            well_vel = well_vel.unsqueeze(1).repeat(1, config.image_size[0], 1)
+                            latents_well = vqvae_model.encode(well_vel.unsqueeze(1))
+                            latents_well = latents_well[:, config.latent_dim[0]//2, :]
+                            
+                            # Change unselected well_pos and latents_well to OOV
+                            well_pos[~with_well_mask] = config.image_size[0]
+                            latents_well[~with_well_mask] = config.vocab_size
+                            
+                            latents_well = latents_well.transpose(0, 1)
+                        else:
+                            well_pos, latents_well = None, None
+                            
+                        if config.use_dip:
+                            with_dip_mask = (torch.rand(len(inputs)) < config.use_dip_prob)
+                            dips[~with_dip_mask] = len(config.dip_bins)
+                            
+                        if config.add_dip_to_well and config.use_dip and config.well_cond_prob:
+                            well_pos2 = torch.clamp(well_pos.clone(), max=config.image_size[0]-1) 
+                            dip_well = dips.clone()
+                            dip_well = dip_well.view(dip_well.shape[0], config.latent_dim[0], config.latent_dim[1])[range(len(well_pos2)), :, well_pos2//config.factor]
+                            dip_well = dip_well.view(dip_well.shape[0], -1)
+                        else:
+                            dip_well = None
+                            
+                        if config.vqvae_refl_dir is not None:
+                            if config.vqvae_dir == config.vqvae_refl_dir:
+                                latents_refl = vqvae_refl_model.encode(torch.stack((torch.zeros_like(refl), refl), dim=1))
                             else:
-                                loss2 = _weighted_seq_loss(outputs2, latents2, cond_weights)
+                                latents_refl = vqvae_refl_model.encode(refl.unsqueeze(1))
+                            latents_refl, orig_shape = _to_sequence2(latents_refl)
+                            with_refl_mask = (torch.rand(len(inputs)) < config.use_refl_prob)
+                            latents_refl[:, ~with_refl_mask] = config.refl_vocab_size
+                        else:
+                            latents_refl = None
 
-                            loss = loss + loss2
-                            
+                        if config.use_init_prob:
+                            if config.vqvae_dir == config.vqvae_refl_dir:
+                                latents_init = vqvae_model.encode(torch.stack((init, torch.zeros_like(init)), dim=1))
+                            else:
+                                latents_init = vqvae_model.encode(init.unsqueeze(1))
+                            latents_init, _ = _to_sequence2(latents_init)
+                            with_init_mask = (torch.rand(len(inputs)) < config.use_init_prob)
+                            latents_init[:, ~with_init_mask] = config.vocab_size
+                        else:
+                            latents_init = None
+                            with_init_mask = torch.ones(len(inputs), dtype=torch.bool).to(config.device)
+
+                        cond_well_mask = (
+                            with_well_mask.to(device) if config.well_cond_prob > 0 else torch.zeros(len(inputs), dtype=torch.bool, device=device)
+                        )
+                        cond_dip_mask = (
+                            with_dip_mask.to(device) if config.use_dip else torch.zeros(len(inputs), dtype=torch.bool, device=device)
+                        )
+                        cond_refl_mask = (
+                            with_refl_mask.to(device) if config.vqvae_refl_dir is not None else torch.zeros(len(inputs), dtype=torch.bool, device=device)
+                        )
+                        cond_init_mask = (
+                            with_init_mask.to(device) if config.use_init_prob else torch.zeros(len(inputs), dtype=torch.bool, device=device)
+                        )
+                        cond_weights = _condition_weights(cond_well_mask, cond_dip_mask, cond_refl_mask, cond_init_mask, config.loss_weight_type)
+
+                        if config.flip_train:
+                            latents2, orig_shape = _to_sequence2(torch.flip(latents, dims=(1,)))
+                        latents, orig_shape = _to_sequence2(latents)
+
+                        if not config.classify:
+                            if teacher_forcing_ratio >= 1:
+                                outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
+                            else:
+                                # First pass - Get predictions with full ground truth
+                                with torch.no_grad():
+                                    outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
+
+                                # Generate teacher forcing mask
+                                rand_gold_pos = torch.rand(*latents.shape) <= teacher_forcing_ratio
+                                
+                                # Clone latents before modifying
+                                latents_new = latents.clone()
+
+                                # Replace sampled positions with predicted values
+                                predicted_tokens = torch.multinomial(outputs.softmax(-1).reshape(-1, outputs.size(-1)), 1)  # Get token predictions
+                                predicted_tokens = predicted_tokens.reshape(*latents.shape).to(latents.dtype)
+                                latents_new[~rand_gold_pos] = predicted_tokens[~rand_gold_pos]  # Replace only sampled positions
+
+                                # Second pass - Train model with modified latents
+                                outputs = model(latents_new, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
+                            loss = _weighted_seq_loss(outputs, latents, cond_weights)
+                            if config.flip_train:
+                                outputs2 = model(latents2, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
+                                if config.flip_train_inv:
+                                    outputs2 = outputs2.reshape(orig_shape[1], orig_shape[2], *outputs2.shape[1:])
+                                    outputs2 = torch.flip(outputs2, dims=(1,)).reshape(-1, *outputs2.shape[1:])
+                                    loss2 = _weighted_seq_loss(outputs2, latents, cond_weights)
+                                else:
+                                    loss2 = _weighted_seq_loss(outputs2, latents2, cond_weights)
+
+                                loss = loss + loss2
+                                
+                            loss_gen = torch.tensor(0.0, device=device)
+                            loss_clf = torch.tensor(0.0, device=device)
+                        else:
+                            clf_logits, outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
+
+                            loss_gen = _weighted_seq_loss(outputs, latents, cond_weights)
+                            loss_clf = _weighted_clf_loss(clf_logits, cls, cond_weights)
+                            loss = loss_gen + loss_clf
+
+                    elif config.model_type == "unet":
+                        well_pos = torch.randint(high=config.image_size[0], size=(len(inputs),)).to(config.device)
+                        well_mask = F.one_hot(well_pos, num_classes=config.image_size[0]).unsqueeze(2).to(config.device)
+                        with_well_mask = (torch.rand(len(inputs)) < config.well_cond_prob).to(config.device)
+                        well_mask = well_mask * with_well_mask[:, None, None]
+
+                        outputs = model(
+                            torch.stack(
+                                [
+                                    init,
+                                    refl,
+                                    inputs * well_mask,
+                                ],
+                                dim=1
+                            )
+                        )
+
+                        loss = loss_fn(outputs, labels)
                         loss_gen = torch.tensor(0.0, device=device)
                         loss_clf = torch.tensor(0.0, device=device)
-                    else:
-                        clf_logits, outputs = model(latents, cls, well_pos, latents_well, dips, latents_refl, dip_well, latents_init)
-
-                        loss_gen = _weighted_seq_loss(outputs, latents, cond_weights)
-                        loss_clf = _weighted_clf_loss(clf_logits, cls, cond_weights)
-                        loss = loss_gen + loss_clf
-                    
+                        
                     # calculate metrics
                     losses_valid += loss.item()
                     losses_gen_valid += loss_gen.item()
                     losses_clf_valid += loss_clf.item()
-                    outputs = _to_sequence2(outputs.argmax(-1), inv=True, orig_shape=orig_shape)
-                    outputs = vqvae_model.decode(outputs).squeeze(1)
+                    if config.model_type == "gpt":
+                        outputs = _to_sequence2(outputs.argmax(-1), inv=True, orig_shape=orig_shape)
+                        outputs = vqvae_model.decode(outputs).squeeze(1)
     #                 outputs = _to_sequence(outputs, inv=True, orig_shape=orig_shape)
                     if config.dataset_type in ["fld2", "syn2"]:
                         selected_outputs = test_dataloader.dataset.denormalize({**batch['input'], 'tensor': outputs})
@@ -1048,9 +1094,10 @@ def run_velgen(model, vqvae_model, vqvae_refl_model, optim, warmup, scheduler, l
             scheduler.load_state_dict(torch.load(checkpoint)['scheduler'])
 
         # Make sure KV cache is disabled properly
-        for layer in model.layers:
-            if hasattr(layer, 'disable_kv_cache'):
-                layer.disable_kv_cache()
+        if config.model_type == "gpt":
+            for layer in model.layers:
+                if hasattr(layer, 'disable_kv_cache'):
+                    layer.disable_kv_cache()
 
     return model, avg_train_loss, avg_valid_loss, time_per_epoch
 

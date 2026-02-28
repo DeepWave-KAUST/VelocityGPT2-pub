@@ -14,13 +14,12 @@ This repository is organized as follows:
 ## Supplementary files
 Data for the experiments can be made available upon a reasonable request by sending an email to the main author (mochammad.randycaesario@kaust.edu.sa).
 
-## Notebooks
+## Scripts
 The following notebooks are provided:
 
-- :orange_book: ``VQVAE_training.ipynb``: notebook performing training of the VQ-VAE;
-- :orange_book: ``VelocityGPT_training.ipynb``: notebook performing training of the GPT;
-- :orange_book: ``Visualization.ipynb``: notebook to visualize the results
-
+- :memo: ``scripts/run_fsq_vel_training.sh``: notebook performing training of the FSQ for the velocities;
+- :memo: ``scripts/run_fsq_refl_training.sh``: notebook performing training of the FSQ for the reflectivity images;
+- :memo: ``scripts/run_gpt_training.sh``: notebook performing training of the GPT;
 
 ## Getting started :space_invader: :robot:
 To ensure reproducibility of the results, we suggest using the `environment.yml` file when creating an environment.

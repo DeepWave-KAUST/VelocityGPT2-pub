@@ -1,6 +1,6 @@
 ![LOGO](https://github.com/DeepWave-KAUST/VelocityGPT-dev/blob/main/asset/logo.png)
 
-Reproducible material for **VelocityGPT: A sequential depth-wise velocity model generator in an autoregressive framework - Harsuko R., Cheng S., Alkhalifah T.**
+Reproducible material for **Velocity model building with uncertainty quantification using a multi-modal autoregressive generative network - Harsuko R., Cheng S., Alkhalifah T.**
 
 # Project structure
 This repository is organized as follows:
@@ -12,7 +12,7 @@ This repository is organized as follows:
 * :open_file_folder: **notebooks**: set of jupyter notebooks reproducing the experiments in the paper (see below for more details);
 
 ## Supplementary files
-We shared the data (velocity models) used in our experiments. Before running the notebooks below, please download the data from [here](https://kaust.sharepoint.com/:f:/r/sites/M365_Deepwave_Documents/Shared%20Documents/Restricted%20Area/DW0041/data?csf=1&web=1&e=4fcQjq). Then, put all the contents into the ``/data`` folder.
+Data for the experiments can be made available upon a reasonable request by sending an email to the main author (mochammad.randycaesario@kaust.edu.sa).
 
 ## Notebooks
 The following notebooks are provided:
@@ -40,5 +40,4 @@ conda activate velocitygpt
 configurations may be required for different combinations of workstation and GPU.
 
 ## Cite us 
-DW0041 - Harsuko et al. (2024) VelocityGPT: A sequential depth-wise velocity model generator in an autoregressive framework.
 

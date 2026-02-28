@@ -1,0 +1,44 @@
+python main.py  \
+	--training_stage gpt-training  \
+	--dataset_type fld2  \
+	--dataset /data/randycm/Documents/Research/Transformers/data/realmodel4/rand_models.npy,/data/randycm/Documents/Research/Transformers/data/realmodel4/rtm_images.npy,/data/randycm/Documents/Research/Transformers/data/realmodel4/init_models.npy  \
+	--dataset_path /data/randycm/Documents/Research/Transformers/data/realmodel4/rand_models.npy,/data/randycm/Documents/Research/Transformers/data/realmodel4/rtm_images.npy,/data/randycm/Documents/Research/Transformers/data/realmodel4/init_models.npy  \
+	--shuffle  \
+	--prop "0,1;0,1"  \
+	--train_prop 0.8  \
+	--stride 32 32  \
+	--norm_mode max mean_std  \
+	--norm_level set  \
+	--norm_const 4500 1 4500  \
+	--scaler2 2 1 2  \
+	--scaler3 0.5 0 0.5  \
+	--aug_flip  \
+	--vocab_size 240  \
+	--refl_vocab_size 240  \
+	--vqvae_dir /home/randycm/Documents/Research/Transformers/testing/ElasticGPT/major-sun-3462  \
+	--vqvae_refl_dir /home/randycm/Documents/Research/Transformers/testing/ElasticGPT/cosmic-haze-3464  \
+	--prepend_refl  \
+	--use_dip  \
+	--use_dip_prob 0.5  \
+	--dip_bins 0-63  \
+	--glob_pos_mode depth  \
+	--well_cond_prob 0.5  \
+	--use_init_prob 0.5  \
+	--attn_type linear  \
+	--hidden_size 128  \
+	--num_attention_heads 8  \
+	--num_hidden_layers 16  \
+	--batch_size 128  \
+	--lr 1e-3  \
+	--patience 9999  \
+	--epoch 31  \
+	--warmup linear  \
+	--warmup_period 5  \
+	--scheduler cosine  \
+	--n_eval_epoch 1  \
+	--n_eval_samples 5  \
+	--n_eval_total 128  \
+	--max_grad_norm 1  \
+	--loss_weight_type num  \
+	--parent_dir /home/randycm/Documents/Research/Transformers/testing/ElasticGPT/  \
+	--wandb_log \

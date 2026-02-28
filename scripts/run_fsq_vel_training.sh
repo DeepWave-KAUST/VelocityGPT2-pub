@@ -1,0 +1,28 @@
+python main.py  \
+	--training_stage vqvae-training  \
+	--dataset_type fld2  \
+	--dataset "/data/randycm/Documents/Research/Transformers/data/realmodel4/rand_models.npy,/data/randycm/Documents/Research/Transformers/data/realmodel4/rand_models.npy;/data/randycm/Documents/Research/Transformers/data/realmodel4/init_models.npy,/data/randycm/Documents/Research/Transformers/data/realmodel4/init_models.npy"  \
+	--dataset_path "/data/randycm/Documents/Research/Transformers/data/realmodel4/rand_models.npy,/data/randycm/Documents/Research/Transformers/data/realmodel4/rand_models.npy;/data/randycm/Documents/Research/Transformers/data/realmodel4/init_models.npy,/data/randycm/Documents/Research/Transformers/data/realmodel4/init_models.npy"  \
+	--shuffle  \
+	--prop "0,1;0,1"  \
+	--train_prop 0.8  \
+	--stride 48 48  \
+	--norm_mode max mean_std  \
+	--norm_level set  \
+	--norm_const 4500 4500  \
+	--scaler2 2 2  \
+	--scaler3 0.5 0.5  \
+	--quantizer fsq  \
+	--quantizer_levels 8 6 5  \
+	--K 240  \
+	--dim 32  \
+	--intermediate_dim 32  \
+	--padding_mode replicate  \
+	--loss vqvae  \
+	--batch_size 1024  \
+	--lr 4e-3  \
+	--epoch 128  \
+	--patience 999  \
+	--parent_dir /data/randycm/Documents/Research/Transformers/testing/ElasticGPT/  \
+	--wandb_log  \
+	--wandb_job_type vqvae-training \

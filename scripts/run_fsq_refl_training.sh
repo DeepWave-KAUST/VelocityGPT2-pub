@@ -1,0 +1,30 @@
+python main.py  \
+	--training_stage vqvae-training-refl  \
+	--dataset_type fld2  \
+	--dataset /data/randycm/Documents/Research/Transformers/data/realmodel4/rtm_images.npy,/data/randycm/Documents/Research/Transformers/data/realmodel4/rtm_images.npy  \
+	--dataset_path /data/randycm/Documents/Research/Transformers/data/realmodel4/rtm_images.npy,/data/randycm/Documents/Research/Transformers/data/realmodel4/rtm_images.npy  \
+	--shuffle  \
+	--prop "0,1;0,1"  \
+	--train_prop 0.8  \
+	--stride 32 32  \
+	--norm_mode max mean_std  \
+	--norm_level set  \
+	--norm_const 1 1  \
+	--scaler2 1 1  \
+	--scaler3 0 0  \
+	--num_classes 65  \
+	--pad_input  \
+	--quantizer fsq  \
+	--quantizer_levels 8 6 5  \
+	--K 240  \
+	--dim 32  \
+	--intermediate_dim 32  \
+	--padding_mode replicate  \
+	--loss vqvae  \
+	--batch_size 1024  \
+	--lr 4e-3  \
+	--epoch 105  \
+	--patience 999  \
+	--parent_dir /home/randycm/Documents/Research/Transformers/testing/ElasticGPT/  \
+	--wandb_log  \
+	--wandb_job_type vqvae-training-refl \
